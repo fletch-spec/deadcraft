@@ -1,0 +1,35 @@
+# Golden test vector for protocol v1. generate.py encodes these values into v1.bin with its own
+# encoder; the C# and Java tests must produce exactly those bytes and read them back to these values.
+# Floats are exactly representable so all three sides agree bit for bit.
+Header.magic = 0x54464344
+Header.version = 1
+Header.mapping_size = 65536
+Header.units_per_block = 64.0
+Header.deadlock_pid = 4242
+Header.minecraft_pid = 31337
+Header.deadlock_heartbeat_ms = 123456789012
+Header.minecraft_heartbeat_ms = 123456789000
+
+HeroState.seq = 42
+HeroState.flags = 7
+HeroState.tick = 9876543210
+HeroState.server_time = 154.25
+HeroState.hero_id = 60
+HeroState.position = -1440.0, 1440.0, 256.5
+HeroState.velocity = 305.25, -33.5, 0.0
+HeroState.eye_position = -1440.0, 1440.0, 342.5
+HeroState.camera_angles = -35.25, 35.5, 0.0
+HeroState.stamina = 3.0
+HeroState.stamina_max = 4.0
+HeroState.health = 756
+HeroState.health_max = 822
+HeroState.ability_event_serial = 2
+
+AbilityEvents[0].serial = 1
+AbilityEvents[0].kind = 1
+AbilityEvents[0].tick = 9876543000
+AbilityEvents[0].ability_name = citadel_ability_dash
+AbilityEvents[1].serial = 2
+AbilityEvents[1].kind = 1
+AbilityEvents[1].tick = 9876543100
+AbilityEvents[1].ability_name = ability_unicorn_spirit_jet

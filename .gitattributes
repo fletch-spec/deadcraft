@@ -1,0 +1,6 @@
+*.bin binary
+*.g.cs text eol=lf
+protocol/java/src/**/*.java text eol=lf
+gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary

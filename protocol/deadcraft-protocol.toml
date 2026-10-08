@@ -1,0 +1,105 @@
+# Deadcraft shared-memory protocol: the single source of truth.
+#
+# Edit this file, then run `python protocol/generate.py` to regenerate the C# and Java bindings and
+# the golden fixture. `python protocol/generate.py --check` fails if anything generated is stale.
+#
+# Rules:
+# - Everything is little-endian and fixed-size. Offsets are explicit and checked by the generator.
+# - Any change to an existing field's offset, type or meaning bumps `version`. Readers refuse a
+#   mapping whose magic, version or size don't match theirs.
+# - Positions, velocities and angles are in Deadlock (Source 2) space: x forward, y left, z up,
+#   in Source units. Convert with `units_per_block` and the axis map below; never hard-code 64.
+
+[protocol]
+magic = 0x54464344          # bytes "DCFT"
+version = 1
+mapping_name = 'Local\Deadcraft'
+mapping_size = 65536
+units_per_block = 64.0      # Source units per Minecraft block (docs/collider-test.md)
+
+# Minecraft (x east, y up, z south) from Source (x, y, z): mc = (x, z, -y) / units_per_block.
+[axes]
+minecraft_x = "+source_x"
+minecraft_y = "+source_z"
+minecraft_z = "-source_y"
+
+# Types: u32 i32 u64 f32 vec3 (3 x f32) and utf8[N] (NUL-padded UTF-8).
+
+[[struct]]
+name = "Header"
+offset = 0x0
+size = 0x40
+doc = "Identifies the mapping and shows which sides are alive."
+fields = [
+  { name = "magic", type = "u32", offset = 0x00 },
+  { name = "version", type = "u32", offset = 0x04 },
+  { name = "mapping_size", type = "u32", offset = 0x08 },
+  { name = "units_per_block", type = "f32", offset = 0x0C },
+  { name = "deadlock_pid", type = "u32", offset = 0x10, doc = "deadworks.exe process id" },
+  { name = "minecraft_pid", type = "u32", offset = 0x14 },
+  { name = "deadlock_heartbeat_ms", type = "u64", offset = 0x18, doc = "GetTickCount64 at the plugin's last write" },
+  { name = "minecraft_heartbeat_ms", type = "u64", offset = 0x20, doc = "GetTickCount64 at the client's last write" },
+]
+
+[[struct]]
+name = "HeroState"
+offset = 0x100
+size = 0x80
+seqlock = true
+doc = "Deadlock -> Minecraft, written every server tick. Seqlock: seq is odd while the plugin writes."
+fields = [
+  { name = "seq", type = "u32", offset = 0x00 },
+  { name = "flags", type = "u32", offset = 0x04, doc = "HeroFlags" },
+  { name = "tick", type = "u64", offset = 0x08, doc = "Deadlock server tick count" },
+  { name = "server_time", type = "f32", offset = 0x10, doc = "seconds (CurTime)" },
+  { name = "hero_id", type = "u32", offset = 0x14, doc = "Deadlock Heroes enum value" },
+  { name = "position", type = "vec3", offset = 0x18, doc = "feet, Source units" },
+  { name = "velocity", type = "vec3", offset = 0x24, doc = "Source units per second" },
+  { name = "eye_position", type = "vec3", offset = 0x30, doc = "Source units" },
+  { name = "camera_angles", type = "vec3", offset = 0x3C, doc = "pitch, yaw, roll in degrees" },
+  { name = "stamina", type = "f32", offset = 0x48 },
+  { name = "stamina_max", type = "f32", offset = 0x4C },
+  { name = "health", type = "i32", offset = 0x50 },
+  { name = "health_max", type = "i32", offset = 0x54 },
+  { name = "ability_event_serial", type = "u32", offset = 0x58, doc = "serial of the newest AbilityEvent" },
+]
+
+[[flags]]
+name = "HeroFlags"
+values = [
+  { name = "present", bit = 0, doc = "a human player's hero pawn exists" },
+  { name = "alive", bit = 1 },
+  { name = "on_ground", bit = 2 },
+]
+
+[[ring]]
+name = "AbilityEvents"
+offset = 0x200
+entry = "AbilityEvent"
+capacity = 32
+doc = """Deadlock -> Minecraft. The plugin fills entry (serial - 1) % capacity, then sets its serial, \
+then HeroState.ability_event_serial. Readers take entries newer than the last serial they saw and \
+re-check the entry's serial after copying it."""
+
+[[struct]]
+name = "AbilityEvent"
+size = 0x40
+doc = "One ability or item use."
+fields = [
+  { name = "serial", type = "u32", offset = 0x00 },
+  { name = "kind", type = "u32", offset = 0x04, doc = "AbilityEventKind" },
+  { name = "tick", type = "u64", offset = 0x08 },
+  { name = "ability_name", type = "utf8[48]", offset = 0x10, doc = "e.g. citadel_ability_..." },
+]
+
+[[enum]]
+name = "AbilityEventKind"
+values = [
+  { name = "used", value = 1, doc = "player_used_ability" },
+]
+
+# 0x1000 onward: Minecraft -> Deadlock (block colliders, incoming damage). Defined in a later version.
+[[reserved]]
+name = "MinecraftToDeadlock"
+offset = 0x1000
+size = 0xF000

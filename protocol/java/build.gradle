@@ -1,0 +1,41 @@
+// Java protocol binding (used by the Fabric mods) and the live CLI reader.
+//   gradlew test          golden-fixture and shared-memory tests
+//   gradlew run           print the Deadlock hero's state live (protocol/README.md)
+plugins {
+	id 'java-library'
+	id 'application'
+}
+
+group = 'dev.deadcraft'
+version = '1'
+
+java {
+	toolchain { languageVersion = JavaLanguageVersion.of(25) }
+}
+
+repositories { mavenCentral() }
+
+dependencies {
+	testImplementation platform('org.junit:junit-bom:5.13.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+sourceSets {
+	// The golden bytes live in protocol/golden, shared with the C# tests.
+	test { resources { srcDir '../golden' } }
+}
+
+application {
+	mainClass = 'dev.deadcraft.protocol.cli.Watch'
+	applicationDefaultJvmArgs = ['--enable-native-access=ALL-UNNAMED']
+}
+
+tasks.named('run') { standardInput = System.in }
+
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+test {
+	useJUnitPlatform()
+	jvmArgs '--enable-native-access=ALL-UNNAMED'
+}
