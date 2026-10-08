@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Throwaway M4 risk spike: can a plugin-spawned box block the hero? Build: dotnet build -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <DeadworksVersion>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)..\..\deadworks.version').Trim())</DeadworksVersion>
+    <DeadworksManagedDir Condition="'$(DeadworksManagedDir)' == ''">$(MSBuildThisFileDirectory)..\..\.deadworks\$(DeadworksVersion)\game\bin\win64\managed</DeadworksManagedDir>
+    <DeadlockDir Condition="'$(DeadlockDir)' == ''">C:\Program Files (x86)\Steam\steamapps\common\Deadlock</DeadlockDir>
+    <PluginDeployDir>$(DeadlockDir)\game\bin\win64\managed\plugins</PluginDeployDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="DeadworksManaged.Api">
+      <HintPath>$(DeadworksManagedDir)\DeadworksManaged.Api.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Google.Protobuf">
+      <HintPath>$(DeadworksManagedDir)\Google.Protobuf.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CheckDeadworks" BeforeTargets="ResolveAssemblyReferences" Condition="!Exists('$(DeadworksManagedDir)\DeadworksManaged.Api.dll')">
+    <Error Text="Deadworks $(DeadworksVersion) not found. Run .\tools\get-deadworks.ps1 from the repo root first." />
+  </Target>
+
+  <!-- Copy into Deadlock's plugin folder when Deadworks is installed there. The server hot-reloads it. -->
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="Exists('$(DeadlockDir)\game\bin\win64\deadworks.exe')">
+    <MakeDir Directories="$(PluginDeployDir)" />
+    <Copy SourceFiles="$(OutputPath)ColliderTest.dll;$(OutputPath)ColliderTest.pdb" DestinationFolder="$(PluginDeployDir)" SkipUnchangedFiles="false" ContinueOnError="WarnAndContinue" />
+    <Message Importance="high" Text="Deployed ColliderTest to $(PluginDeployDir)" />
+  </Target>
+
+</Project>

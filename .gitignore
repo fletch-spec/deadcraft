@@ -30,3 +30,6 @@ assets-local/
 # Local machine config
 local.props
 *.local.json
+
+# Downloaded Deadworks releases (tools/get-deadworks.ps1)
+.deadworks/
