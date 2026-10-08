@@ -33,3 +33,6 @@ local.props
 
 # Downloaded Deadworks releases (tools/get-deadworks.ps1)
 .deadworks/
+
+# Converted courses are generated from the .nbt by tools/nbt-to-colliders.py
+courses/*.json

@@ -107,6 +107,65 @@ public class ColliderTest : DeadworksPluginBase
 		Say(caller, $"teleported to {Fmt(pawn.Position)}");
 	}
 
+	// ---- Feel test course (docs/feel-test.md) ----------------------------------------------------
+	// Units per Minecraft block, decided from the collider test. Moves to /protocol in M2.
+	private const float UnitsPerBlock = 64f;
+	// wood_crate_64 is 64 x 64 wide but 66.5 tall, so crates are placed by their top face.
+	private const float CrateHeight = 66.5f;
+	// The superflat export has 4 floor layers (bedrock, dirt, dirt, grass) under the course.
+	private const int CourseFloorBlocks = 4;
+	private static readonly string CourseDir = Path.Combine(
+		Path.GetDirectoryName(Environment.ProcessPath) ?? ".", "deadcraft", "courses");
+	private Vector3? _courseAnchor;
+
+	private sealed record Course(string Name, int[] SizeBlocks, float[][] Boxes);
+
+	// Minecraft (x east, y up, z south, blocks) to Source (x, y left, z up, units), relative to the anchor.
+	private static Vector3 ToSource(Vector3 anchor, float x, float y, float z) =>
+		anchor + new Vector3(x * UnitsPerBlock, -z * UnitsPerBlock, y * UnitsPerBlock);
+
+	[Command("dc_build", Description = "dc_build <course> [height]: build a converted .nbt course in the air above you")]
+	public void CmdBuild(CCitadelPlayerController caller, string name = "feel1", float height = 3000f)
+	{
+		if (caller.GetHeroPawn() is not { } pawn) { Say(caller, "no hero pawn"); return; }
+		string file = Path.Combine(CourseDir, name + ".json");
+		if (!File.Exists(file)) { Say(caller, $"no course at {file}"); return; }
+		var course = System.Text.Json.JsonSerializer.Deserialize<Course>(File.ReadAllText(file),
+			new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+		if (course == null) { Say(caller, "course file is empty"); return; }
+
+		ClearAll();
+		float half = course.SizeBlocks[0] / 2f;
+		var p = pawn.Position;
+		var anchor = new Vector3(p.X - half * UnitsPerBlock, p.Y + half * UnitsPerBlock,
+			p.Z + height - CourseFloorBlocks * UnitsPerBlock);
+		int spawned = 0;
+		foreach (var b in course.Boxes)
+		{
+			float x = b[0], y = b[1], z = b[2], s = b[3];
+			var topCenter = ToSource(anchor, x + s / 2f, y + s, z + s / 2f);
+			if (SpawnBox(CrateModel, topCenter - new Vector3(0, 0, CrateHeight * s), true, s) != null) spawned++;
+		}
+		_courseAnchor = anchor;
+		Say(caller, $"built {course.Name}: {spawned}/{course.Boxes.Length} colliders, anchor {Fmt(anchor)}");
+		TeleportToCourse(pawn);
+	}
+
+	[Command("dc_course", Description = "Teleport back to the start of the built course")]
+	public void CmdCourse(CCitadelPlayerController caller)
+	{
+		if (caller.GetHeroPawn() is not { } pawn) { Say(caller, "no hero pawn"); return; }
+		if (_courseAnchor == null) { Say(caller, "build a course first: /dc_build feel1"); return; }
+		TeleportToCourse(pawn);
+	}
+
+	// Start at the course's north-west corner, facing east (+x in Minecraft, yaw 0 in Source).
+	private void TeleportToCourse(CCitadelPlayerPawn pawn)
+	{
+		var start = ToSource(_courseAnchor!.Value, 1.5f, CourseFloorBlocks, 1.5f) + new Vector3(0, 0, 8f);
+		pawn.TeleportWithView(start, Vector3.Zero);
+	}
+
 	[Command("dc_clear", Description = "Remove every test box")]
 	public void CmdClear(CCitadelPlayerController caller)
 	{
@@ -170,6 +229,7 @@ public class ColliderTest : DeadworksPluginBase
 			if (box.IsValid) box.Remove();
 		_boxes.Clear();
 		_poolHome.Clear();
+		_courseAnchor = null;
 	}
 
 	private static Vector3 Forward(Vector3 angles)
