@@ -38,3 +38,24 @@
 6. **Long walks.** The Deadlock map has bounds. Walking a few hundred blocks from the anchor should eventually hit them. Fix: recentre (teleport the hero and shift the frame offset together).
 7. **"Standing on air" server notices.** Still about one every 10 to 20 s, when Deadlock says grounded but Minecraft's own terrain under the player doesn't match exactly (fence tops, edges, the void floor). Harmless in singleplayer; M5's server mod should own this check.
 8. **Colliders are visible in Deadlock** as grey cubes. Irrelevant once Minecraft draws over Deadlock; could be hidden with a render mode later.
+
+## Hardening pass (2026-10-09, later)
+
+| Change | Result in game |
+|---|---|
+| **Protocol v3:** 256 KiB mapping, 16384 cubes. Plugin cap 8000 (ours, not Deadlock's) | Village needs 1070 to 1520 cubes; nothing dropped |
+| **Buried cubes skipped** (all six faces touch solid cells) | Covered by a unit test; fewer colliders in solid terrain |
+| **Recentring:** when the hero leaves a box (3000 units sideways, 700 up or down) around home, the plugin teleports hero and colliders by the same delta in one tick and publishes it (`recenter_serial`, `recenter_delta`); the client moves its anchor by the same amount | The hero's position updates the same tick; the Minecraft player stays continuous through every recentre (no jumps in the log). Vertical recentring makes caves and drops unlimited; horizontal makes long walks unlimited |
+| **Home over the floor slab:** the plugin traces down at the four candidate slab centres at map start and puts home 1500 units above the one that hits ((4096, 4096), z 2012) | Colliders are visible and the hero stands normally |
+| **Respawn re-anchoring:** a hero jump over 24 blocks without a recentre re-anchors instead of teleporting the Minecraft player | Fired once, correctly |
+| `sv_cheats` on the void map moved into the main plugin; spike plugin removed from the plugins folder | |
+
+**What went wrong on the way, for the record:**
+1. **Colliders far from the map's geometry don't work.** At z 6000 the hero fell straight through freshly moved colliders.
+2. **Colliders off the map's footprint aren't sent to the client.** Home at (0, 0), the slab's corner, left the server holding the hero up while the client saw no colliders, so it played the falling animation and nothing rendered.
+
+Rule: keep everything over the map's geometry. The void map's slab is 8192 units square centred on (4096, 4096) with its top at z 512, so home sits over its centre and recentring keeps the hero within 3000 units of it.
+
+**Cosmetic:** some cubes (seen on stair roofs) collide but aren't drawn in Deadlock, even up close. Invisible once Minecraft draws over Deadlock; colliders can be hidden deliberately later, which also saves client rendering.
+
+**Still unverified:** the 30-block drop below the anchor ground (caves); placing and breaking blocks; recentre bursts with more than about 1500 colliders (each recentre teleports every active collider at once).

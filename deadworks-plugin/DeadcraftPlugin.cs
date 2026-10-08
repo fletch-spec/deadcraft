@@ -22,10 +22,15 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private Vector3 _recenterDelta;
 	private string _cheatsMap = "";
 
-	// Recentring keeps the hero inside this box around Home, far above the void map's floor block
-	// (so caves and ravines are open) and away from the map's edges (so long walks never reach them).
-	private static readonly Vector3 Home = new(0f, 0f, 6000f);
-	private const float MaxHorizontal = 6000f, MinZ = 3000f, MaxZ = 9000f;
+	// Recentring keeps the hero inside this box around Home: above the void map's floor block (top
+	// at z 512) and inside the map's bounds, where colliders work. At z 6000 they didn't (the hero
+	// fell through them); the feel-test course worked up to about z 2500. Falling below MinZ recentres
+	// again, so caves and ravines have no depth limit; long walks never reach the map's edges.
+	// Home's x and y are found at map start (FindHome): the centre of the void map's floor slab.
+	// Entities far from the map's geometry aren't sent to clients, so home must sit over the slab.
+	private Vector3 Home = new(0f, 0f, 2000f);
+	private bool _homeFound;
+	private const float MaxHorizontal = 3000f;
 	private const string VoidMap = "deadcraft_void";
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
@@ -64,6 +69,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			_cheatsMap = Server.MapName;
 			if (_cheatsMap == VoidMap) Server.ExecuteCommand("sv_cheats 1");
 		}
+		if (!_homeFound) FindHome();
 		var hero = FindHero();
 		if (hero != null && hero.IsAlive) MaybeRecenter(hero);
 		var state = new HeroState { Tick = (ulong)GlobalVars.TickCount, ServerTime = GlobalVars.CurTime };
@@ -101,19 +107,39 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		Log(_colliders.Apply(mc, _cubes));
 	}
 
+	// The void map's floor slab is 8192 units square with a corner at the origin (maps/deadcraft_void.vmap);
+	// which quadrant isn't recorded, so trace down at each candidate centre and take the one that hits.
+	// Runs before any collider exists, so only the map's own geometry can be hit.
+	private void FindHome()
+	{
+		_homeFound = true;
+		if (Server.MapName != VoidMap || _colliders.Total > 0) return;
+		foreach (var (x, y) in new[] { (4096f, 4096f), (4096f, -4096f), (-4096f, 4096f), (-4096f, -4096f) })
+		{
+			var hit = Trace.Ray(new Vector3(x, y, 4000f), new Vector3(x, y, -4000f), InteractionLayer.Solid);
+			Log($"floor probe at ({x}, {y}): {(hit.DidHit ? $"hit at z {hit.HitPosition.Z}" : "no hit")}");
+			if (!hit.DidHit) continue;
+			Home = new Vector3(x, y, hit.HitPosition.Z + 1500f);
+			Log($"home is {Home}");
+			return;
+		}
+		Log("no floor found under any candidate; home stays at " + Home);
+	}
+
 	// Only once colliders exist: before the Minecraft client links, the hero stands on the map's own
 	// floor and must stay there.
 	private void MaybeRecenter(CCitadelPlayerPawn hero)
 	{
 		if (_colliders.Active == 0) return;
 		var p = hero.Position;
-		if (Math.Abs(p.X - Home.X) < MaxHorizontal && Math.Abs(p.Y - Home.Y) < MaxHorizontal && p.Z > MinZ && p.Z < MaxZ) return;
+		if (Math.Abs(p.X - Home.X) < MaxHorizontal && Math.Abs(p.Y - Home.Y) < MaxHorizontal
+			&& p.Z > Home.Z - 700f && p.Z < Home.Z + 700f) return;
 		var delta = Home - p;
 		hero.Teleport(position: p + delta);  // keeps velocity: a fall or a dash carries on
 		_colliders.Shift(delta);
 		_recenterSerial++;
 		_recenterDelta = delta;
-		Log($"recentred by {delta} (hero was at {p})");
+		Log($"recentred by {delta} (hero was at {p}, now {hero.Position}) tick {GlobalVars.TickCount}");
 	}
 
 	// The human player's hero, re-found when it changes (respawn, hero swap, reconnect).

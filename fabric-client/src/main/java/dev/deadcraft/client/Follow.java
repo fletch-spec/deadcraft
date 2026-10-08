@@ -85,7 +85,8 @@ public final class Follow {
 			// the player doesn't move at all.
 			Vec3 d = Proto.toMinecraft(hero.recenterDelta);
 			heroAnchor = new Vec3(heroAnchor.x() + d.x(), heroAnchor.y() + d.y(), heroAnchor.z() + d.z());
-			LOG.info("Deadcraft: Deadlock recentred by {} blocks", String.format("(%.1f, %.1f, %.1f)", d.x(), d.y(), d.z()));
+			LOG.info("Deadcraft: Deadlock recentred by {} blocks; hero now {} (tick {}), player at {}",
+				String.format("(%.1f, %.1f, %.1f)", d.x(), d.y(), d.z()), fmt(heroBlocks), hero.tick, fmt(player));
 		}
 		recenterSerial = hero.recenterSerial;
 		if (!anchorRequested && lastDisplacement != null) {
@@ -94,7 +95,8 @@ public final class Follow {
 			if (jump > RESPAWN_JUMP_BLOCKS) {
 				// A big jump that isn't a recentre: respawn or a Deadlock-side teleport. Keep the player
 				// where they are and re-anchor rather than throwing them across the world.
-				LOG.info("Deadcraft: hero jumped {} blocks, re-anchoring", String.format("%.0f", jump));
+				LOG.info("Deadcraft: hero jumped {} blocks, re-anchoring; hero {} tick {} serial {}, player {}",
+					String.format("%.0f", jump), fmt(heroBlocks), hero.tick, hero.recenterSerial, fmt(player));
 				anchorRequested = true;
 			}
 		}
@@ -183,6 +185,15 @@ public final class Follow {
 		}
 		if (state.isPresent()) lastProblem = "";
 		return state;
+	}
+
+
+	private static String fmt(Vec3 v) {
+		return String.format("(%.2f, %.2f, %.2f)", v.x(), v.y(), v.z());
+	}
+
+	private static String fmt(LocalPlayer p) {
+		return String.format("(%.2f, %.2f, %.2f)", p.getX(), p.getY(), p.getZ());
 	}
 
 	private static double sq(double v) {
