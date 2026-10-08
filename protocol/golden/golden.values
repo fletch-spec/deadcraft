@@ -2,8 +2,8 @@
 # encoder; the C# and Java tests must produce exactly those bytes and read them back to these values.
 # Floats are exactly representable so all three sides agree bit for bit.
 Header.magic = 0x54464344
-Header.version = 2
-Header.mapping_size = 65536
+Header.version = 3
+Header.mapping_size = 262144
 Header.units_per_block = 64.0
 Header.deadlock_pid = 4242
 Header.minecraft_pid = 31337
@@ -24,6 +24,8 @@ HeroState.stamina_max = 4.0
 HeroState.health = 756
 HeroState.health_max = 822
 HeroState.ability_event_serial = 2
+HeroState.recenter_serial = 4
+HeroState.recenter_delta = 1440.0, -1440.0, 5743.5
 
 AbilityEvents[0].serial = 1
 AbilityEvents[0].kind = 1

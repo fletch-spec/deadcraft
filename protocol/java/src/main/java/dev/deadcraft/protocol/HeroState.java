@@ -21,6 +21,8 @@ public final class HeroState {
 	public static final int HEALTH_AT = 0x50;
 	public static final int HEALTH_MAX_AT = 0x54;
 	public static final int ABILITY_EVENT_SERIAL_AT = 0x58;
+	public static final int RECENTER_SERIAL_AT = 0x5C;
+	public static final int RECENTER_DELTA_AT = 0x60;
 
 	public int seq;  // unsigned
 	public int flags;  // HeroFlags
@@ -36,6 +38,8 @@ public final class HeroState {
 	public int health;
 	public int healthMax;
 	public int abilityEventSerial;  // serial of the newest AbilityEvent
+	public int recenterSerial;  // bumps each time the plugin recentres
+	public Vec3 recenterDelta = Vec3.ZERO;  // Source units the hero and every collider moved in the latest recentre
 
 	/** Decode from a little-endian buffer; {@code at} is where this struct starts. */
 	public static HeroState read(ByteBuffer b, int at) {
@@ -54,6 +58,8 @@ public final class HeroState {
 		v.health = b.getInt(at + HEALTH_AT);
 		v.healthMax = b.getInt(at + HEALTH_MAX_AT);
 		v.abilityEventSerial = b.getInt(at + ABILITY_EVENT_SERIAL_AT);
+		v.recenterSerial = b.getInt(at + RECENTER_SERIAL_AT);
+		v.recenterDelta = new Vec3(b.getFloat(at + RECENTER_DELTA_AT), b.getFloat(at + RECENTER_DELTA_AT + 4), b.getFloat(at + RECENTER_DELTA_AT + 8));
 		return v;
 	}
 
@@ -73,6 +79,8 @@ public final class HeroState {
 		b.putInt(at + HEALTH_AT, health);
 		b.putInt(at + HEALTH_MAX_AT, healthMax);
 		b.putInt(at + ABILITY_EVENT_SERIAL_AT, abilityEventSerial);
+		b.putInt(at + RECENTER_SERIAL_AT, recenterSerial);
+		b.putFloat(at + RECENTER_DELTA_AT, recenterDelta.x()).putFloat(at + RECENTER_DELTA_AT + 4, recenterDelta.y()).putFloat(at + RECENTER_DELTA_AT + 8, recenterDelta.z());
 	}
 
 	@Override
@@ -91,16 +99,18 @@ public final class HeroState {
 			&& Float.compare(staminaMax, v.staminaMax) == 0
 			&& health == v.health
 			&& healthMax == v.healthMax
-			&& abilityEventSerial == v.abilityEventSerial;
+			&& abilityEventSerial == v.abilityEventSerial
+			&& recenterSerial == v.recenterSerial
+			&& recenterDelta.equals(v.recenterDelta);
 	}
 
 	@Override
 	public int hashCode() {
-		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial);
+		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial, recenterSerial, recenterDelta);
 	}
 
 	@Override
 	public String toString() {
-		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + "]";
+		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + ", " + "recenterSerial=" + recenterSerial + ", " + "recenterDelta=" + recenterDelta + "]";
 	}
 }

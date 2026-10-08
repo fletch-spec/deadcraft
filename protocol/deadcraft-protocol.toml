@@ -12,9 +12,9 @@
 
 [protocol]
 magic = 0x54464344          # bytes "DCFT"
-version = 2
+version = 3
 mapping_name = 'Local\Deadcraft'
-mapping_size = 65536
+mapping_size = 262144
 units_per_block = 64.0      # Source units per Minecraft block (docs/collider-test.md)
 
 # Minecraft (x east, y up, z south) from Source (x, y, z): mc = (x, z, -y) / units_per_block.
@@ -62,6 +62,8 @@ fields = [
   { name = "health", type = "i32", offset = 0x50 },
   { name = "health_max", type = "i32", offset = 0x54 },
   { name = "ability_event_serial", type = "u32", offset = 0x58, doc = "serial of the newest AbilityEvent" },
+  { name = "recenter_serial", type = "u32", offset = 0x5C, doc = "bumps each time the plugin recentres" },
+  { name = "recenter_delta", type = "vec3", offset = 0x60, doc = "Source units the hero and every collider moved in the latest recentre" },
 ]
 
 [[flags]]
@@ -125,7 +127,7 @@ values = [
 name = "Cubes"
 offset = 0x1040
 entry = "Cube"
-capacity = 2048
+capacity = 16384
 doc = "Solid space around the player as grid-aligned cubes, in half blocks. Entries 0 .. McState.cube_count - 1 are valid."
 
 [[struct]]
@@ -139,8 +141,8 @@ fields = [
   { name = "edge", type = "u8", offset = 0x6, doc = "edge length in half blocks" },
 ]
 
-# 0x5040 onward: free for later Minecraft -> Deadlock data (incoming damage, ability effects).
+# 0x21040 onward: free for later Minecraft -> Deadlock data (incoming damage, ability effects).
 [[reserved]]
 name = "Unused"
-offset = 0x5040
-size = 0xAFC0
+offset = 0x21040
+size = 0x1EFC0

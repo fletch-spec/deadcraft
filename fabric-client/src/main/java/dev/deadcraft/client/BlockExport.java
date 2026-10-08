@@ -74,14 +74,21 @@ final class BlockExport {
 		int sx = Math.floorDiv(feet.getX() + RADIUS, ALIGN) * ALIGN + ALIGN - base.x();
 		int sy = Math.floorDiv(feet.getY() + ABOVE, ALIGN) * ALIGN + ALIGN - base.y();
 		int sz = Math.floorDiv(feet.getZ() + RADIUS, ALIGN) * ALIGN + ALIGN - base.z();
-		List<CubeMerge.Cube> merged = CubeMerge.merge(sample(mc.level, base, sx, sy, sz), sx * RES, sy * RES, sz * RES);
+		int nx = sx * RES, ny = sy * RES, nz = sz * RES;
+		boolean[] solid = sample(mc.level, base, sx, sy, sz);
+		List<CubeMerge.Cube> merged = new ArrayList<>();
+		int buried = 0;
+		for (CubeMerge.Cube c : CubeMerge.merge(solid, nx, ny, nz)) {
+			if (CubeMerge.buried(solid, nx, ny, nz, c)) buried++;
+			else merged.add(c);
+		}
 
 		if (merged.size() > Proto.CUBES_CAPACITY) {
 			// Keep the cubes nearest the player.
 			double px = (mc.player.getX() - base.x()) * RES, py = (mc.player.getY() - base.y()) * RES, pz = (mc.player.getZ() - base.z()) * RES;
 			merged = new ArrayList<>(merged);
 			merged.sort(Comparator.comparingDouble(c -> sq(c.x() + c.edge() / 2.0 - px) + sq(c.y() + c.edge() / 2.0 - py) + sq(c.z() + c.edge() / 2.0 - pz)));
-			Follow.LOG.warn("Deadcraft: {} cubes around the player, sending the nearest {}", merged.size(), Proto.CUBES_CAPACITY);
+			Follow.LOG.warn("Deadcraft: {} cubes around the player ({} buried ones skipped), sending the nearest {}", merged.size(), buried, Proto.CUBES_CAPACITY);
 			merged = merged.subList(0, Proto.CUBES_CAPACITY);
 		}
 

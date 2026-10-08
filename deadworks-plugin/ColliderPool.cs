@@ -18,7 +18,8 @@ internal sealed class ColliderPool
 	private const float ModelSize = 79.4f;
 	private const float ModelTop = 39.6f;
 	private static readonly Vector3 ParkAt = new(0f, 0f, -12000f);
-	private const int MaxColliders = 2600;
+	// Our own safety cap, not Deadlock's: raise it as stress tests show what Deadlock handles.
+	private const int MaxColliders = 8000;
 
 	private readonly record struct Key(int X, int Y, int Z, byte Edge);
 
@@ -26,6 +27,9 @@ internal sealed class ColliderPool
 	private readonly Dictionary<byte, Stack<CBaseEntity>> _parked = new();
 	private int _total;
 	private Double3 _frameOffset;
+	// After a recentre the plugin's offset leads the client's until the client's next publish
+	// catches up; cube sets that still carry the old offset are placed with ours.
+	private bool _awaitingClientOffset;
 
 	public int Active => _active.Count;
 	public int Total => _total;
@@ -33,8 +37,14 @@ internal sealed class ColliderPool
 	/// <summary>Brings the colliders in line with a new cube set. Returns a one-line summary.</summary>
 	public string Apply(McState state, List<Cube> cubes)
 	{
-		bool offsetChanged = state.FrameOffset != _frameOffset;
-		_frameOffset = state.FrameOffset;
+		var incoming = state.FrameOffset;
+		if (_awaitingClientOffset)
+		{
+			if (Close(incoming, _frameOffset)) _awaitingClientOffset = false;
+			else incoming = _frameOffset;
+		}
+		bool offsetChanged = !Close(incoming, _frameOffset);
+		_frameOffset = incoming;
 
 		var wanted = new HashSet<Key>(cubes.Count);
 		foreach (var c in cubes)
@@ -79,6 +89,23 @@ internal sealed class ColliderPool
 		return $"gen {state.Generation}: {cubes.Count} cubes, +{added} -{parked} moved {moved}" +
 			(dropped > 0 ? $" DROPPED {dropped} (cap {MaxColliders})" : "") + $", {_active.Count} active / {_total} spawned";
 	}
+
+	/// <summary>
+	/// Moves every active collider by <paramref name="delta"/> Source units, along with the frame
+	/// offset, in the same tick the hero is teleported by the same amount (a recentre).
+	/// </summary>
+	public void Shift(Vector3 delta)
+	{
+		// Source (x, y, z) to Minecraft blocks: (x, z, -y) / UnitsPerBlock.
+		_frameOffset = new Double3(_frameOffset.X + delta.X / Proto.UnitsPerBlock,
+			_frameOffset.Y + delta.Z / Proto.UnitsPerBlock, _frameOffset.Z - delta.Y / Proto.UnitsPerBlock);
+		foreach (var (key, entity) in _active)
+			if (entity.IsValid) entity.Teleport(position: Place(key));
+		_awaitingClientOffset = true;
+	}
+
+	private static bool Close(Double3 a, Double3 b) =>
+		Math.Abs(a.X - b.X) < 1e-3 && Math.Abs(a.Y - b.Y) < 1e-3 && Math.Abs(a.Z - b.Z) < 1e-3;
 
 	/// <summary>Removes every collider (plugin unload).</summary>
 	public void Clear()

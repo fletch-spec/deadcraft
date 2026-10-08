@@ -41,6 +41,10 @@ public final class Follow {
 	private static boolean savedPauseOnLostFocus;
 	private static String lastProblem = "";
 	private static HeroState lastState;
+	/** The hero moving this far in one frame without a recentre means respawn or teleport. */
+	private static final double RESPAWN_JUMP_BLOCKS = 24;
+	private static int recenterSerial;
+	private static Vec3 lastDisplacement;
 	private static final BlockExport export = new BlockExport();
 	private static long lastGoodRead;
 
@@ -76,6 +80,24 @@ public final class Follow {
 		HeroState hero = state.get();
 		lastState = hero;
 		Vec3 heroBlocks = Proto.toMinecraft(hero.position);
+		if (hero.recenterSerial != recenterSerial && !anchorRequested) {
+			// The plugin moved the hero and every collider by recenterDelta; move the anchor with them so
+			// the player doesn't move at all.
+			Vec3 d = Proto.toMinecraft(hero.recenterDelta);
+			heroAnchor = new Vec3(heroAnchor.x() + d.x(), heroAnchor.y() + d.y(), heroAnchor.z() + d.z());
+			LOG.info("Deadcraft: Deadlock recentred by {} blocks", String.format("(%.1f, %.1f, %.1f)", d.x(), d.y(), d.z()));
+		}
+		recenterSerial = hero.recenterSerial;
+		if (!anchorRequested && lastDisplacement != null) {
+			double jump = Math.sqrt(sq(heroBlocks.x() - heroAnchor.x() - lastDisplacement.x())
+				+ sq(heroBlocks.y() - heroAnchor.y() - lastDisplacement.y()) + sq(heroBlocks.z() - heroAnchor.z() - lastDisplacement.z()));
+			if (jump > RESPAWN_JUMP_BLOCKS) {
+				// A big jump that isn't a recentre: respawn or a Deadlock-side teleport. Keep the player
+				// where they are and re-anchor rather than throwing them across the world.
+				LOG.info("Deadcraft: hero jumped {} blocks, re-anchoring", String.format("%.0f", jump));
+				anchorRequested = true;
+			}
+		}
 		if (anchorRequested) {
 			anchorRequested = false;
 			anchorX = player.getX();
@@ -89,6 +111,7 @@ public final class Follow {
 			}
 			heroAnchor = heroBlocks;
 		}
+		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
 		double x = anchorX + (heroBlocks.x() - heroAnchor.x());
 		double y = anchorY + (heroBlocks.y() - heroAnchor.y());
 		double z = anchorZ + (heroBlocks.z() - heroAnchor.z());
@@ -162,8 +185,13 @@ public final class Follow {
 		return state;
 	}
 
+	private static double sq(double v) {
+		return v * v;
+	}
+
 	private static void setLinked(Minecraft mc, boolean link) {
 		linked = link;
+		lastDisplacement = null;
 		if (link) {
 			anchorRequested = true;
 			// Deadlock has the keyboard and mouse, so Minecraft must keep running without focus.

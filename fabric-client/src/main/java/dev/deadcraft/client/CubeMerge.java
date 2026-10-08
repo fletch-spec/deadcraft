@@ -39,6 +39,30 @@ public final class CubeMerge {
 		return cubes;
 	}
 
+	/**
+	 * True if every cell touching the cube's six faces is solid and inside the grid: nothing can
+	 * reach the cube, so it needs no collider. Cells outside the grid count as unknown (not buried).
+	 */
+	public static boolean buried(boolean[] solid, int nx, int ny, int nz, Cube c) {
+		int x0 = c.x(), y0 = c.y(), z0 = c.z(), e = c.edge();
+		if (x0 == 0 || y0 == 0 || z0 == 0 || x0 + e >= nx || y0 + e >= ny || z0 + e >= nz) return false;
+		return allSet(solid, nx, ny, nz, x0 - 1, y0, z0, 1, e, e) && allSet(solid, nx, ny, nz, x0 + e, y0, z0, 1, e, e)
+			&& allSet(solid, nx, ny, nz, x0, y0 - 1, z0, e, 1, e) && allSet(solid, nx, ny, nz, x0, y0 + e, z0, e, 1, e)
+			&& allSet(solid, nx, ny, nz, x0, y0, z0 - 1, e, e, 1) && allSet(solid, nx, ny, nz, x0, y0, z0 + e, e, e, 1);
+	}
+
+	private static boolean allSet(boolean[] g, int nx, int ny, int nz, int x0, int y0, int z0, int dx, int dy, int dz) {
+		for (int x = x0; x < x0 + dx; x++) {
+			for (int y = y0; y < y0 + dy; y++) {
+				int row = (x * ny + y) * nz;
+				for (int z = z0; z < z0 + dz; z++) {
+					if (!g[row + z]) return false;
+				}
+			}
+		}
+		return true;
+	}
+
 	private static boolean allSet(boolean[] g, int nx, int ny, int nz, int x0, int y0, int z0, int e) {
 		for (int x = x0; x < x0 + e; x++) {
 			for (int y = y0; y < y0 + e; y++) {

@@ -10,16 +10,16 @@ namespace Deadcraft.Protocol;
 public static partial class Proto
 {
 	public const uint Magic = 0x54464344;
-	public const uint Version = 2;
+	public const uint Version = 3;
 	public const string MappingName = @"Local\Deadcraft";
-	public const int MappingSize = 65536;
+	public const int MappingSize = 262144;
 	public const float UnitsPerBlock = 64.0f;
 
 	public const int AbilityEventsOffset = 0x200;
 	public const int AbilityEventsCapacity = 32;
 
 	public const int CubesOffset = 0x1040;
-	public const int CubesCapacity = 2048;
+	public const int CubesCapacity = 16384;
 
 	/// <summary>Deadlock (Source) units to Minecraft blocks: mc = (x, z, -y) / UnitsPerBlock.</summary>
 	public static Vector3 ToMinecraft(Vector3 source) =>
@@ -138,6 +138,8 @@ public struct HeroState
 	public const int HealthAt = 0x50;
 	public const int HealthMaxAt = 0x54;
 	public const int AbilityEventSerialAt = 0x58;
+	public const int RecenterSerialAt = 0x5C;
+	public const int RecenterDeltaAt = 0x60;
 
 	public uint Seq;
 	public uint Flags; // HeroFlags
@@ -153,6 +155,8 @@ public struct HeroState
 	public int Health;
 	public int HealthMax;
 	public uint AbilityEventSerial; // serial of the newest AbilityEvent
+	public uint RecenterSerial; // bumps each time the plugin recentres
+	public Vector3 RecenterDelta; // Source units the hero and every collider moved in the latest recentre
 
 	public HeroState() { }
 
@@ -173,6 +177,8 @@ public struct HeroState
 		Health = BinaryPrimitives.ReadInt32LittleEndian(s.Slice(HealthAt)),
 		HealthMax = BinaryPrimitives.ReadInt32LittleEndian(s.Slice(HealthMaxAt)),
 		AbilityEventSerial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(AbilityEventSerialAt)),
+		RecenterSerial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(RecenterSerialAt)),
+		RecenterDelta = new Vector3(Proto.ReadSingle(s, RecenterDeltaAt), Proto.ReadSingle(s, RecenterDeltaAt + 4), Proto.ReadSingle(s, RecenterDeltaAt + 8)),
 	};
 
 	/// <summary>Encode into a span that starts at this struct.</summary>
@@ -192,6 +198,8 @@ public struct HeroState
 		BinaryPrimitives.WriteInt32LittleEndian(s.Slice(HealthAt), Health);
 		BinaryPrimitives.WriteInt32LittleEndian(s.Slice(HealthMaxAt), HealthMax);
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(AbilityEventSerialAt), AbilityEventSerial);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(RecenterSerialAt), RecenterSerial);
+		Proto.WriteSingle(s, RecenterDeltaAt, RecenterDelta.X); Proto.WriteSingle(s, RecenterDeltaAt + 4, RecenterDelta.Y); Proto.WriteSingle(s, RecenterDeltaAt + 8, RecenterDelta.Z);
 	}
 }
 

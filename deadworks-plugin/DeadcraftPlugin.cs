@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.Versioning;
 using Deadcraft.Protocol;
 using DeadworksManaged.Api;
@@ -17,6 +18,15 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private readonly ColliderPool _colliders = new();
 	private readonly List<Cube> _cubes = new();
 	private uint _cubeGeneration;
+	private uint _recenterSerial;
+	private Vector3 _recenterDelta;
+	private string _cheatsMap = "";
+
+	// Recentring keeps the hero inside this box around Home, far above the void map's floor block
+	// (so caves and ravines are open) and away from the map's edges (so long walks never reach them).
+	private static readonly Vector3 Home = new(0f, 0f, 6000f);
+	private const float MaxHorizontal = 6000f, MinZ = 3000f, MaxZ = 9000f;
+	private const string VoidMap = "deadcraft_void";
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
 
@@ -48,7 +58,14 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	{
 		if (_mapping == null) return;
 		_mapping.DeadlockHeartbeat();
+		if (Server.MapName != _cheatsMap)
+		{
+			// The void map has no baked light; sv_cheats lets players use mat_fullbright 1.
+			_cheatsMap = Server.MapName;
+			if (_cheatsMap == VoidMap) Server.ExecuteCommand("sv_cheats 1");
+		}
 		var hero = FindHero();
+		if (hero != null && hero.IsAlive) MaybeRecenter(hero);
 		var state = new HeroState { Tick = (ulong)GlobalVars.TickCount, ServerTime = GlobalVars.CurTime };
 		if (hero != null)
 		{
@@ -68,6 +85,8 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			state.Health = hero.Health;
 			state.HealthMax = hero.GetMaxHealth();
 		}
+		state.RecenterSerial = _recenterSerial;
+		state.RecenterDelta = _recenterDelta;
 		_mapping.WriteHeroState(state);
 		SyncColliders();
 	}
@@ -80,6 +99,21 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		_cubeGeneration = mc.Generation;
 		if ((mc.Flags & (uint)McFlags.Linked) == 0) return;
 		Log(_colliders.Apply(mc, _cubes));
+	}
+
+	// Only once colliders exist: before the Minecraft client links, the hero stands on the map's own
+	// floor and must stay there.
+	private void MaybeRecenter(CCitadelPlayerPawn hero)
+	{
+		if (_colliders.Active == 0) return;
+		var p = hero.Position;
+		if (Math.Abs(p.X - Home.X) < MaxHorizontal && Math.Abs(p.Y - Home.Y) < MaxHorizontal && p.Z > MinZ && p.Z < MaxZ) return;
+		var delta = Home - p;
+		hero.Teleport(position: p + delta);  // keeps velocity: a fall or a dash carries on
+		_colliders.Shift(delta);
+		_recenterSerial++;
+		_recenterDelta = delta;
+		Log($"recentred by {delta} (hero was at {p})");
 	}
 
 	// The human player's hero, re-found when it changes (respawn, hero swap, reconnect).
