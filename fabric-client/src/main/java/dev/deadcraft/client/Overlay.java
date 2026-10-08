@@ -218,9 +218,31 @@ final class Overlay {
 		}
 	}
 
+	/**
+	 * Deadlock's game window. Several top-level windows can carry the title (helper and hidden ones),
+	 * so take the visible one with the largest client area.
+	 */
 	private static MemorySegment findDeadlock() throws Throwable {
 		try (Arena arena = Arena.ofConfined()) {
-			return (MemorySegment) FIND_WINDOW.invoke(MemorySegment.NULL, arena.allocateFrom(DEADLOCK_TITLE, StandardCharsets.UTF_16LE));
+			MemorySegment title = arena.allocateFrom(DEADLOCK_TITLE, StandardCharsets.UTF_16LE);
+			MemorySegment rect = arena.allocate(16);
+			MemorySegment best = MemorySegment.NULL;
+			long bestArea = 0;
+			MemorySegment w = MemorySegment.NULL;
+			while (true) {
+				w = (MemorySegment) FIND_WINDOW_EX.invoke(MemorySegment.NULL, w, MemorySegment.NULL, title);
+				if (w.address() == 0) break;
+				int visible = (int) IS_WINDOW_VISIBLE.invoke(w);
+				int ok = (int) GET_CLIENT_RECT.invoke(w, rect);
+				long area = (long) rect.get(JAVA_INT, 8) * rect.get(JAVA_INT, 12);
+				Follow.LOG.info("Deadcraft: overlay candidate window 0x{} visible {} client {}x{}", Long.toHexString(w.address()),
+					visible != 0, rect.get(JAVA_INT, 8), rect.get(JAVA_INT, 12));
+				if (visible != 0 && area > bestArea) {
+					best = w;
+					bestArea = area;
+				}
+			}
+			return best;
 		}
 	}
 
