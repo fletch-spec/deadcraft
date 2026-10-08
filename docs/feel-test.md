@@ -90,3 +90,22 @@ Spend 10 to 15 minutes. Paste back short notes:
 2. That a custom map without Deadlock's game-mode entities lets a hero spawn and move. Fallback: `/dc_tp`.
 3. That a `.vpk` in `game\citadel\maps` loads with `+map` on the Windows build, as it does in Deadworks' Docker image.
 4. Structure block size limit in 26.3.
+
+## Results (2026-10-09)
+
+The Hammer route above was replaced by building the course from colliders, which is what M4 does anyway:
+
+1. Export `feel1.nbt` with a structure block (superflat, 48 × 48 × 48, 4 floor layers included). In 26.x the file is under `generated\minecraft\structure\` and the palette uses `id`/`properties`.
+2. `python tools/nbt-to-colliders.py courses/feel1.nbt`: half-block voxels merged into 767 cubes.
+3. Host map: `maps/deadcraft_void.vmap` (one large floor block and spawns), compiled with `.\tools\compile-map.ps1` (CSDK 12 `bin_cs2` compiler; Hammer's own build fails with a particleslib schema mismatch).
+4. `.\tools\run-server.ps1 -Map deadcraft_void`, connect, `mat_fullbright 1` (the map is unlit; the plugin turns on `sv_cheats` on this map), then `/dc_build feel1 1000` on top of the floor block.
+
+**Verdict: it feels like Deadlock.** Movement on block geometry plays as Deadlock movement.
+
+| Note | Meaning |
+|---|---|
+| Hero looks small next to the blocks, roughly 3/4 of what you'd expect | The hull is 1.75 blocks tall (112 units at 64 per block), close to Minecraft's 1.8; Celeste's visible model is shorter than the shared hero hull. Doesn't affect collision. In the real setup Minecraft draws the world, and the camera height is an M3 decision |
+| Thin gaps or lines between cube textures | Visual only: the test cube's render bounds are slightly asymmetric (79.4 units, origin off-centre by up to 0.2). Collision was flat. Not visible in the real setup, where Minecraft draws everything |
+| Hero spawns on the map's floor block, not at the course | Expected: the course is placed by command. A falling hero is caught below z −1500 and put on the course |
+
+Not yet measured: the widest gap per move, the highest climbable wall, and step-up over slabs and stairs. Worth recording on the next run, since they tune nothing but are good regression numbers.

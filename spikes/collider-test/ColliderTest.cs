@@ -120,6 +120,7 @@ public class ColliderTest : DeadworksPluginBase
 	private static readonly string CourseDir = Path.Combine(
 		Path.GetDirectoryName(Environment.ProcessPath) ?? ".", "deadcraft", "courses");
 	private Vector3? _courseAnchor;
+	private float[][]? _courseBoxes;
 
 	private sealed record Course(string Name, int[] SizeBlocks, float[][] Boxes);
 
@@ -131,17 +132,27 @@ public class ColliderTest : DeadworksPluginBase
 	public void CmdBuild(CCitadelPlayerController caller, string name = "feel1", float height = 400f)
 	{
 		if (caller.GetHeroPawn() is not { } pawn) { Say(caller, "no hero pawn"); return; }
-		string file = Path.Combine(CourseDir, name + ".json");
-		if (!File.Exists(file)) { Say(caller, $"no course at {file}"); return; }
-		var course = System.Text.Json.JsonSerializer.Deserialize<Course>(File.ReadAllText(file),
-			new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-		if (course == null) { Say(caller, "course file is empty"); return; }
+		if (LoadCourse(name) is not { } course) { Say(caller, $"no course {name} in {CourseDir}"); return; }
 
-		ClearAll();
 		float half = course.SizeBlocks[0] / 2f;
 		var p = pawn.Position;
 		var anchor = new Vector3(p.X - half * UnitsPerBlock, p.Y + half * UnitsPerBlock,
 			p.Z + height - CourseFloorBlocks * UnitsPerBlock);
+		Say(caller, BuildCourse(course, anchor));
+		TeleportToCourse(pawn);
+	}
+
+	private static Course? LoadCourse(string name)
+	{
+		string file = Path.Combine(CourseDir, name + ".json");
+		if (!File.Exists(file)) return null;
+		return System.Text.Json.JsonSerializer.Deserialize<Course>(File.ReadAllText(file),
+			new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+	}
+
+	private string BuildCourse(Course course, Vector3 anchor)
+	{
+		ClearAll();
 		int spawned = 0;
 		foreach (var b in course.Boxes)
 		{
@@ -152,8 +163,8 @@ public class ColliderTest : DeadworksPluginBase
 			if (SpawnBox(BlockModel, top - new Vector3(0, 0, BlockModelTop * scale), true, scale) != null) spawned++;
 		}
 		_courseAnchor = anchor;
-		Say(caller, $"built {course.Name}: {spawned}/{course.Boxes.Length} colliders, anchor {Fmt(anchor)}");
-		TeleportToCourse(pawn);
+		_courseBoxes = course.Boxes;
+		return $"built {course.Name}: {spawned}/{course.Boxes.Length} colliders, anchor {Fmt(anchor)}";
 	}
 
 	// Seam test: a 3 x 3 floor of 4-block tiles, top 1 block above your feet, to see whether a model's
@@ -194,6 +205,28 @@ public class ColliderTest : DeadworksPluginBase
 		var col = world?.Collision;
 		Say(caller, $"world {world?.Classname}: mins={Fmt(col?.Mins)} maxs={Fmt(col?.Maxs)}");
 		if (caller.GetHeroPawn() is { } pawn) Say(caller, $"you are at {Fmt(pawn.Position)}");
+	}
+
+	// Where did the course's boxes actually end up? Logs one box per size with its real position and
+	// scale next to where the course data says it should be.
+	[Command("dc_check", Description = "Log where the built course's boxes really are")]
+	public void CmdCheck(CCitadelPlayerController caller)
+	{
+		if (_courseAnchor is not { } anchor || _courseBoxes == null) { Say(caller, "build a course first"); return; }
+		int valid = _boxes.Count(b => b.IsValid);
+		Say(caller, $"{valid}/{_boxes.Count} boxes valid, anchor {Fmt(anchor)}");
+		var seen = new HashSet<float>();
+		for (int i = 0; i < _courseBoxes.Length && i < _boxes.Count; i++)
+		{
+			var b = _courseBoxes[i];
+			bool feature = b[1] >= CourseFloorBlocks;
+			if (!seen.Add(b[3] + (feature ? 100f : 0f))) continue;
+			var e = _boxes[i];
+			var top = ToSource(anchor, b[0] + b[3] / 2f, b[1] + b[3], b[2] + b[3] / 2f);
+			Log($"box {i} mc=({b[0]},{b[1]},{b[2]}) size {b[3]} expectTop={Fmt(top)} pos={Fmt(e.Position)} " +
+				$"sceneScale={e.BodyComponent?.SceneNode?.Scale:F3} valid={e.IsValid} model={e.ModelName}");
+		}
+		Say(caller, "details written to the log");
 	}
 
 	[Command("dc_course", Description = "Teleport back to the start of the built course")]
@@ -242,6 +275,7 @@ public class ColliderTest : DeadworksPluginBase
 		if (!simulating) return;
 		float t = GlobalVars.CurTime;
 		TrackPawn(t);
+		if (Server.MapName == VoidMap && (GlobalVars.TickCount & 15) == 0) VoidMapTick();
 
 		if (_mover != null)
 		{
@@ -268,6 +302,33 @@ public class ColliderTest : DeadworksPluginBase
 					$"(tick budget {GlobalVars.IntervalPerTick * 1000f:F2} ms)");
 				_poolMs = 0; _poolTicks = 0; _lastReport = t;
 			}
+		}
+	}
+
+	// ---- Void map (maps/deadcraft_void.vmap) ------------------------------------------------------
+	// Empty except a floor whose position we don't control well, so the plugin owns the space:
+	// a hero falling below CatchZ is put on the course, built at the map centre if needed.
+	private const string VoidMap = "deadcraft_void";
+	private const float CatchZ = -1500f;
+	private bool _voidCheatsOn;
+
+	private void VoidMapTick()
+	{
+		if (!_voidCheatsOn)
+		{
+			// The map has no baked light; sv_cheats lets clients use mat_fullbright 1.
+			Server.ExecuteCommand("sv_cheats 1");
+			_voidCheatsOn = true;
+			Log("void map: sv_cheats 1");
+		}
+		foreach (var pawn in Entities.ByClass<CCitadelPlayerPawn>())
+		{
+			if (!pawn.IsAlive || pawn.IsBot || pawn.Position.Z > CatchZ) continue;
+			if (_courseAnchor == null && LoadCourse("feel1") is { } course)
+				Log(BuildCourse(course, new Vector3(-24f * UnitsPerBlock, 24f * UnitsPerBlock, 0f)));
+			if (_courseAnchor == null) continue;
+			Log($"caught falling hero at {Fmt(pawn.Position)}");
+			TeleportToCourse(pawn);
 		}
 	}
 

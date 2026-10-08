@@ -2,7 +2,7 @@
 
 Play on a Minecraft Java server as a real Deadlock hero (first target: Celeste). Deadlock's own engine supplies the movement and abilities; Minecraft supplies the world, blocks, mobs, other players and the picture you look at.
 
-> **Status: M1 + collider spike.** M0 findings: [docs/feasibility.md](docs/feasibility.md). Waiting on in-game results from [docs/collider-test.md](docs/collider-test.md) and [docs/feel-test.md](docs/feel-test.md).
+> **Status: M1 done, next M2.** Findings: [feasibility](docs/feasibility.md), [collider test](docs/collider-test.md), [feel test](docs/feel-test.md). A Deadlock hero runs a Minecraft-built course made of plugin-spawned colliders, and it feels like Deadlock.
 
 ## How it works
 
