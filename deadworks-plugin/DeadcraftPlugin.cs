@@ -73,15 +73,14 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		var hero = FindHero();
 		bool alive = hero != null && hero.IsAlive;
 		if (!alive) _aliveSince = -1f;
-		else if (_aliveSince < 0)
+		else if (_aliveSince < 0) _aliveSince = GlobalVars.CurTime;
+		// Deadlock rejects the void map's spawn entities and spawns heroes at the world origin, the
+		// slab's corner, sometimes twice per spawn. Nothing else ever puts a hero there (home is over
+		// the slab's centre), so a hero near the origin has just spawned: move it to the centre.
+		if (alive && Server.MapName == VoidMap && Math.Abs(hero!.Position.X) < 300f && Math.Abs(hero.Position.Y) < 300f)
 		{
-			_aliveSince = GlobalVars.CurTime;
-			// Just spawned (or respawned): stand on the middle of the slab, not at the world origin.
-			if (Server.MapName == VoidMap)
-			{
-				hero!.Teleport(position: SlabCentreTop + new Vector3(0f, 0f, 16f), velocity: Vector3.Zero);
-				Log("placed the spawning hero on the middle of the floor slab");
-			}
+			hero.Teleport(position: SlabCentreTop + new Vector3(0f, 0f, 16f), velocity: Vector3.Zero);
+			Log($"moved the spawning hero from {hero.Position} to the middle of the floor slab");
 		}
 		if (alive) MaybeRecenter(hero!);
 		var state = new HeroState { Tick = (ulong)GlobalVars.TickCount, ServerTime = GlobalVars.CurTime };
@@ -155,38 +154,6 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			Log($"{humans} human players on this server; bridging only the first. Each player needs their own server.");
 		}
 		return _hero;
-	}
-
-	// What the Deadlock client is sent. It needs the colliders near its hero to predict movement
-	// (without them it predicts falls and walks through walls), and nothing else: the server
-	// collides with all of them anyway. Sending every collider crashed the server at about 1700, and
-	// the void map's own visibility data only covers a thin layer over its floor, so set the
-	// transmit bits ourselves: on within TransmitRadius of the hero, off for every other collider.
-	// CheckTransmitEvent only offers Hide; it wraps the engine's per-player bitset, so we set bits
-	// in it directly.
-	private const float TransmitRadius = 8 * Proto.UnitsPerBlock;
-	private static readonly System.Reflection.FieldInfo? TransmitBitsField =
-		typeof(CheckTransmitEvent).GetField("_transmitBits", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
-	private bool _warnedTransmit;
-
-	public override unsafe void OnCheckTransmit(CheckTransmitEvent args)
-	{
-		if (_colliders.Total == 0) return;
-		foreach (var entity in _colliders.AllEntities)
-			if (entity.IsValid) args.Hide(entity);
-		if (_hero == null || !_hero.IsValid) return;
-		if (TransmitBitsField?.GetValue(args) is not { } boxed)
-		{
-			if (!_warnedTransmit) Log("can't reach the transmit bitset; colliders may not show on clients");
-			_warnedTransmit = true;
-			return;
-		}
-		var bits = (ulong*)System.Reflection.Pointer.Unbox(boxed);
-		foreach (var entity in _colliders.Near(_hero.Position, TransmitRadius))
-		{
-			int index = entity.EntityIndex;
-			if (index >= 0) bits[index >> 6] |= 1UL << (index & 63);
-		}
 	}
 
 	[GameEventHandler("player_used_ability")]

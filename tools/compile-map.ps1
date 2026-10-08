@@ -13,7 +13,11 @@ $content = Join-Path $Csdk "content\citadel_addons\deadcraft\maps\$Map.vmap"
 # The map source lives in the repo; the compiler needs it inside the CSDK's content tree.
 New-Item -ItemType Directory -Force (Split-Path $content) | Out-Null
 Copy-Item (Join-Path $repo "maps\$Map.vmap") $content -Force
-& (Join-Path $Csdk 'game\bin_cs2\win64\resourcecompiler.exe') -retail -breakpad -nompi -nop4 -world -phys -vis `
+# Always a clean full build: the compiler otherwise skips an unchanged map and keeps stale outputs.
+Remove-Item (Join-Path $Csdk "game\citadel_addons\deadcraft\maps\$Map*") -Recurse -Force -ErrorAction SilentlyContinue
+# No -vis: visibility data built from a single floor slab covered only a thin layer above it, so
+# Deadlock did not send clients the colliders higher up (docs/m4-report.md). Without it nothing is culled.
+& (Join-Path $Csdk 'game\bin_cs2\win64\resourcecompiler.exe') -retail -breakpad -nompi -nop4 -fshallow -world -phys `
     -outroot (Join-Path $Csdk 'game') -i $content
 if ($LASTEXITCODE) { throw "resourcecompiler failed ($LASTEXITCODE)" }
 $vpk = Join-Path $Csdk "game\citadel_addons\deadcraft\maps\$Map.vpk"
