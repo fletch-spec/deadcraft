@@ -1,0 +1,32 @@
+# Build output
+bin/
+obj/
+build/
+.gradle/
+run/
+out/
+*.class
+
+# IDEs
+.idea/
+.vs/
+.vscode/
+*.iml
+*.user
+
+# Valve assets are never committed. Paths to them live in config.
+assets-local/
+*.vpk
+*.vmdl
+*.vmdl_c
+*.vmat
+*.vmat_c
+*.vtex
+*.vtex_c
+*.vmap
+*.vmap_c
+*.vpcf_c
+
+# Local machine config
+local.props
+*.local.json
