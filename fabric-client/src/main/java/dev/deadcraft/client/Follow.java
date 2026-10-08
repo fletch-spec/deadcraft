@@ -46,6 +46,8 @@ public final class Follow {
 	private static int recenterSerial;
 	private static Vec3 lastDisplacement;
 	private static final BlockExport export = new BlockExport();
+	private static final HeroTimeline timeline = new HeroTimeline();
+	private static boolean savedBobView;
 	private static long lastGoodRead;
 
 	private Follow() {}
@@ -58,7 +60,9 @@ public final class Follow {
 	public static void clientTick(Minecraft mc) {
 		if (mapping == null) return;
 		Double3 offset = new Double3(heroAnchor.x() - anchorX, heroAnchor.y() - anchorY, heroAnchor.z() - anchorZ);
+		long t0 = System.nanoTime();
 		export.tick(mc, mapping, linked && !anchorRequested, offset);
+		exportMax = Math.max(exportMax, (System.nanoTime() - t0) / 1e9);
 	}
 
 	/** Called at the start of every frame, before the world is ticked and drawn. */
@@ -80,11 +84,13 @@ public final class Follow {
 		HeroState hero = state.get();
 		lastState = hero;
 		Vec3 heroBlocks = Proto.toMinecraft(hero.position);
+		double localNow = System.nanoTime() / 1e9;
 		if (hero.recenterSerial != recenterSerial && !anchorRequested) {
-			// The plugin moved the hero and every collider by recenterDelta; move the anchor with them so
-			// the player doesn't move at all.
+			// The plugin moved the hero and every collider by recenterDelta; move the anchor (and the
+			// buffered samples) with them so the player doesn't move at all.
 			Vec3 d = Proto.toMinecraft(hero.recenterDelta);
 			heroAnchor = new Vec3(heroAnchor.x() + d.x(), heroAnchor.y() + d.y(), heroAnchor.z() + d.z());
+			timeline.shift(d.x(), d.y(), d.z());
 			LOG.info("Deadcraft: Deadlock recentred by {} blocks; hero now {} (tick {}), player at {}",
 				String.format("(%.1f, %.1f, %.1f)", d.x(), d.y(), d.z()), fmt(heroBlocks), hero.tick, fmt(player));
 		}
@@ -112,24 +118,37 @@ public final class Follow {
 				if (!Double.isNaN(ground)) anchorY = ground;
 			}
 			heroAnchor = heroBlocks;
+			timeline.clear();
 		}
 		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
-		double x = anchorX + (heroBlocks.x() - heroAnchor.x());
-		double y = anchorY + (heroBlocks.y() - heroAnchor.y());
-		double z = anchorZ + (heroBlocks.z() - heroAnchor.z());
+
+		Vec3 v = Proto.toMinecraft(hero.velocity);
+		timeline.add(new HeroTimeline.Sample(hero.tick, hero.serverTime, heroBlocks.x(), heroBlocks.y(), heroBlocks.z(),
+			hero.cameraAngles.y(), hero.cameraAngles.x(), v.x(), v.y(), v.z()), localNow);
+		HeroTimeline.Pose pose = timeline.poseAt(localNow);
+		double x = anchorX + (pose.x() - heroAnchor.x());
+		double y = anchorY + (pose.y() - heroAnchor.y());
+		double z = anchorZ + (pose.z() - heroAnchor.z());
 		player.setPos(x, y, z);
 		// Same old and new position: nothing left for Minecraft to interpolate, we place it every frame.
 		player.xo = player.xOld = x;
 		player.yo = player.yOld = y;
 		player.zo = player.zOld = z;
 		player.setDeltaMovement(net.minecraft.world.phys.Vec3.ZERO);
-		player.setOnGround((hero.flags & HeroFlags.ON_GROUND) != 0);
+		// Grounded only if Minecraft's own blocks agree; claiming ground in mid-air makes the server
+		// resend the chunk below ("standing on air"), which flashes nearby buildings.
+		boolean grounded = (hero.flags & HeroFlags.ON_GROUND) != 0;
+		if (grounded) {
+			double ground = groundBelow(mc, x, y + 0.05, z);
+			grounded = !Double.isNaN(ground) && y - ground < 0.1;
+		}
+		player.setOnGround(grounded);
 		player.resetFallDistance();
 
 		if (mc.gui.screen() == null) {
 			// Source yaw 0 faces +x (Minecraft east, yaw -90) and turns toward +y (Minecraft north).
-			float yaw = -90f - hero.cameraAngles.y();
-			float pitch = hero.cameraAngles.x();
+			float yaw = -90f - pose.yaw();
+			float pitch = pose.pitch();
 			player.setYRot(yaw);
 			player.setXRot(pitch);
 			player.yRotO = yaw;
@@ -139,6 +158,31 @@ public final class Follow {
 			player.yBodyRot = yaw;
 			player.yBodyRotO = yaw;
 		}
+		frameStats(mc, localNow);
+	}
+
+	// ---- frame timing (logged every 10 s while linked) ----------------------------------------
+
+	private static double lastFrame, statsSince, frameMax, frameSum, exportMax;
+	private static int frames;
+
+	private static void frameStats(Minecraft mc, double now) {
+		if (lastFrame > 0) {
+			double dt = now - lastFrame;
+			frameMax = Math.max(frameMax, dt);
+			frameSum += dt;
+			frames++;
+		}
+		lastFrame = now;
+		if (statsSince == 0) statsSince = now;
+		if (now - statsSince < 10 || frames == 0) return;
+		LOG.info("Deadcraft: frames {} avg {} ms ({} fps) worst {} ms; block export worst {} ms; limit {} vsync {}",
+			frames, String.format("%.2f", frameSum / frames * 1000), String.format("%.0f", frames / frameSum),
+			String.format("%.1f", frameMax * 1000), String.format("%.1f", exportMax * 1000),
+			mc.options.framerateLimit().get(), mc.options.enableVsync().get());
+		statsSince = now;
+		frameMax = frameSum = exportMax = 0;
+		frames = 0;
 	}
 
 	/** Top of the first solid block at or below (x, y, z) within 16 blocks, or NaN. */
@@ -208,10 +252,19 @@ public final class Follow {
 			// Deadlock has the keyboard and mouse, so Minecraft must keep running without focus.
 			savedPauseOnLostFocus = mc.options.pauseOnLostFocus;
 			mc.options.pauseOnLostFocus = false;
+			// Minecraft's walk bob is computed from position changes we overwrite every frame, so it
+			// twitches the hand and camera; Deadlock's camera doesn't bob like that anyway.
+			savedBobView = mc.options.bobView().get();
+			mc.options.bobView().set(false);
+			timeline.clear();
+			var monitor = mc.getWindow().findBestMonitor();
+			LOG.info("Deadcraft: monitor {} Hz, frame limit {}, vsync {}", monitor == null ? "?" : monitor.currentMode().getRefreshRate(),
+				mc.options.framerateLimit().get(), mc.options.enableVsync().get());
 			lastProblem = "";
 			status(mc, "Deadcraft: following the Deadlock hero");
 		} else {
 			mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
+			mc.options.bobView().set(savedBobView);
 			status(mc, "Deadcraft: unlinked, vanilla movement" + (lastProblem.isEmpty() ? "" : " (" + lastProblem + ")"));
 		}
 		LOG.info("Deadcraft: {}", link ? "linked" : "unlinked " + lastProblem);
