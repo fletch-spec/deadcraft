@@ -25,6 +25,10 @@ internal sealed class ColliderPool
 
 	private readonly Dictionary<Key, CBaseEntity> _active = new();
 	private readonly Dictionary<byte, Stack<CBaseEntity>> _parked = new();
+	// Server tick each collider was spawned on: forcing a just-spawned entity onto a client crashes
+	// the engine (null network state in engine2.dll), so Near() skips young ones.
+	private readonly Dictionary<uint, int> _spawnedAt = new();
+	private const int MinTransmitAgeTicks = 4;
 	private int _total;
 	private Double3 _frameOffset;
 	// After a recentre the plugin's offset leads the client's until the client's next publish
@@ -81,6 +85,7 @@ internal sealed class ColliderPool
 			{
 				entity = spawned;
 				_total++;
+				_spawnedAt[spawned.EntityHandle] = GlobalVars.TickCount;
 			}
 			if (entity == null) { dropped++; continue; }
 			_active[key] = entity;
@@ -117,8 +122,10 @@ internal sealed class ColliderPool
 	public IEnumerable<CBaseEntity> Near(Vector3 point, float radius)
 	{
 		double r2 = (double)radius * radius;
+		int oldEnough = GlobalVars.TickCount - MinTransmitAgeTicks;
 		foreach (var (key, entity) in _active)
 		{
+			if (!entity.IsValid || (_spawnedAt.TryGetValue(entity.EntityHandle, out int born) && born > oldEnough)) continue;
 			// The cube in Minecraft blocks (hero frame), then the point's distance to it in Source units.
 			double edge = key.Edge / 2.0;
 			double x0 = key.X / 2.0 + _frameOffset.X, y0 = key.Y / 2.0 + _frameOffset.Y, z0 = key.Z / 2.0 + _frameOffset.Z;
@@ -138,6 +145,7 @@ internal sealed class ColliderPool
 			if (entity.IsValid) entity.Remove();
 		_active.Clear();
 		_parked.Clear();
+		_spawnedAt.Clear();
 		_total = 0;
 	}
 

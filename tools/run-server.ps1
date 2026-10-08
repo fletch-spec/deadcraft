@@ -4,7 +4,9 @@
 param(
     [string]$Map = 'dl_midtown',
     [int]$Port = 27067,
-    [string]$DeadlockDir = 'C:\Program Files (x86)\Steam\steamapps\common\Deadlock'
+    [string]$DeadlockDir = 'C:\Program Files (x86)\Steam\steamapps\common\Deadlock',
+    # Capture the server console to this file instead of showing a console window (for diagnosing crashes).
+    [string]$LogFile = ''
 )
 $ErrorActionPreference = 'Stop'
 $bin = Join-Path $DeadlockDir 'game\bin\win64'
@@ -16,5 +18,11 @@ $launch = @(
     '+tv_citadel_auto_record', '0', '+spec_replay_enable', '0', '+tv_enable', '0',
     '+citadel_upload_replay_enabled', '0', '+con_logfile', 'deadcraft_server.log', '+hostport', $Port, '+map', $Map
 )
-Start-Process -FilePath (Join-Path $bin 'deadworks.exe') -ArgumentList $launch -WorkingDirectory $bin
+if ($LogFile) {
+    Start-Process -FilePath (Join-Path $bin 'deadworks.exe') -ArgumentList $launch -WorkingDirectory $bin `
+        -RedirectStandardOutput $LogFile -RedirectStandardError "$LogFile.err" -WindowStyle Hidden
+    Write-Host "Server console is going to $LogFile"
+} else {
+    Start-Process -FilePath (Join-Path $bin 'deadworks.exe') -ArgumentList $launch -WorkingDirectory $bin
+}
 Write-Host "Deadworks starting on port $Port with map $Map. In Deadlock's console: connect localhost:$Port"

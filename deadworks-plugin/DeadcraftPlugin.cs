@@ -22,16 +22,17 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private Vector3 _recenterDelta;
 	private string _cheatsMap = "";
 
-	// Recentring keeps the hero inside this box around Home: above the void map's floor block (top
-	// at z 512) and inside the map's bounds, where colliders work. At z 6000 they didn't (the hero
-	// fell through them); the feel-test course worked up to about z 2500. Falling below MinZ recentres
-	// again, so caves and ravines have no depth limit; long walks never reach the map's edges.
-	// Home's x and y are found at map start (FindHome): the centre of the void map's floor slab.
-	// Entities far from the map's geometry aren't sent to clients, so home must sit over the slab.
-	private Vector3 Home = new(0f, 0f, 2000f);
-	private bool _homeFound;
-	private const float MaxHorizontal = 3000f;
+	// The void map (maps/deadcraft_void.vmap): one floor slab, 8192 units square, centred on
+	// (4096, 4096), top at z 512. Its spawn entities aren't accepted by Deadlock (it falls back to
+	// the world origin, the slab's corner), so the plugin places spawning heroes itself.
+	private static readonly Vector3 SlabCentreTop = new(4096f, 4096f, 512f);
+	// Recentring keeps the hero inside a box around Home, over the slab: Deadlock only collides with
+	// and sends clients entities over the map's geometry (docs/m4-report.md). Falling out of the box
+	// recentres again, so drops have no depth limit and walks no length limit.
+	private static readonly Vector3 Home = SlabCentreTop + new Vector3(0f, 0f, 1500f);
+	private const float MaxHorizontal = 3000f, MaxVertical = 700f;
 	private const string VoidMap = "deadcraft_void";
+	private float _aliveSince = -1f;
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
 
@@ -69,9 +70,20 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			_cheatsMap = Server.MapName;
 			if (_cheatsMap == VoidMap) Server.ExecuteCommand("sv_cheats 1");
 		}
-		if (!_homeFound) FindHome();
 		var hero = FindHero();
-		if (hero != null && hero.IsAlive) MaybeRecenter(hero);
+		bool alive = hero != null && hero.IsAlive;
+		if (!alive) _aliveSince = -1f;
+		else if (_aliveSince < 0)
+		{
+			_aliveSince = GlobalVars.CurTime;
+			// Just spawned (or respawned): stand on the middle of the slab, not at the world origin.
+			if (Server.MapName == VoidMap)
+			{
+				hero!.Teleport(position: SlabCentreTop + new Vector3(0f, 0f, 16f), velocity: Vector3.Zero);
+				Log("placed the spawning hero on the middle of the floor slab");
+			}
+		}
+		if (alive) MaybeRecenter(hero!);
 		var state = new HeroState { Tick = (ulong)GlobalVars.TickCount, ServerTime = GlobalVars.CurTime };
 		if (hero != null)
 		{
@@ -107,33 +119,16 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		Log(_colliders.Apply(mc, _cubes));
 	}
 
-	// The void map's floor slab is 8192 units square with a corner at the origin (maps/deadcraft_void.vmap);
-	// which quadrant isn't recorded, so trace down at each candidate centre and take the one that hits.
-	// Runs before any collider exists, so only the map's own geometry can be hit.
-	private void FindHome()
-	{
-		_homeFound = true;
-		if (Server.MapName != VoidMap || _colliders.Total > 0) return;
-		foreach (var (x, y) in new[] { (4096f, 4096f), (4096f, -4096f), (-4096f, 4096f), (-4096f, -4096f) })
-		{
-			var hit = Trace.Ray(new Vector3(x, y, 4000f), new Vector3(x, y, -4000f), InteractionLayer.Solid);
-			Log($"floor probe at ({x}, {y}): {(hit.DidHit ? $"hit at z {hit.HitPosition.Z}" : "no hit")}");
-			if (!hit.DidHit) continue;
-			Home = new Vector3(x, y, hit.HitPosition.Z + 1500f);
-			Log($"home is {Home}");
-			return;
-		}
-		Log("no floor found under any candidate; home stays at " + Home);
-	}
-
 	// Only once colliders exist: before the Minecraft client links, the hero stands on the map's own
 	// floor and must stay there.
 	private void MaybeRecenter(CCitadelPlayerPawn hero)
 	{
-		if (_colliders.Active == 0) return;
+		// Not before home is known, and not until the hero has been alive a moment: during hero
+		// select and spawning the pawn sits at the origin and must not be moved.
+		if (_colliders.Active == 0 || Server.MapName != VoidMap || _aliveSince < 0 || GlobalVars.CurTime - _aliveSince < 1f) return;
 		var p = hero.Position;
 		if (Math.Abs(p.X - Home.X) < MaxHorizontal && Math.Abs(p.Y - Home.Y) < MaxHorizontal
-			&& p.Z > Home.Z - 700f && p.Z < Home.Z + 700f) return;
+			&& Math.Abs(p.Z - Home.Z) < MaxVertical) return;
 		var delta = Home - p;
 		hero.Teleport(position: p + delta);  // keeps velocity: a fall or a dash carries on
 		_colliders.Shift(delta);
