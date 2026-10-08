@@ -16,6 +16,9 @@ public final class DeadcraftClient implements ClientModInitializer {
 				.then(ClientCommands.literal("anchor").executes(c -> reply(c.getSource(), Follow.anchor())))
 				.then(ClientCommands.literal("on").executes(c -> reply(c.getSource(), Follow.setEnabled(true))))
 				.then(ClientCommands.literal("off").executes(c -> reply(c.getSource(), Follow.setEnabled(false))))
+				.then(ClientCommands.literal("overlay")
+					.then(ClientCommands.literal("on").executes(c -> reply(c.getSource(), Follow.setOverlay(true))))
+					.then(ClientCommands.literal("off").executes(c -> reply(c.getSource(), Follow.setOverlay(false)))))
 				.executes(c -> reply(c.getSource(), Follow.status()))));
 	}
 

@@ -47,6 +47,7 @@ public final class Follow {
 	private static Vec3 lastDisplacement;
 	private static final BlockExport export = new BlockExport();
 	private static final HeroTimeline timeline = new HeroTimeline();
+	private static final Overlay overlay = new Overlay();
 	private static boolean savedBobView;
 	private static long lastGoodRead;
 
@@ -79,6 +80,7 @@ public final class Follow {
 		}
 		boolean shouldLink = state.isPresent() && player != null && player.isAlive();
 		if (shouldLink != linked) setLinked(mc, shouldLink);
+		overlay.update(mc, linked);
 		if (!linked) return;
 
 		HeroState hero = state.get();
@@ -286,6 +288,10 @@ public final class Follow {
 	static String anchor() {
 		anchorRequested = true;
 		return linked ? "Re-anchored: the hero's position now maps to where you stand." : "Not linked; will anchor on link.";
+	}
+
+	static String setOverlay(boolean on) {
+		return overlay.setEnabled(on);
 	}
 
 	static String setEnabled(boolean on) {
