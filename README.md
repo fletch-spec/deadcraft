@@ -44,19 +44,28 @@ Filled in as each component lands.
 
 1. Windows 11, Deadlock (Steam), Minecraft Java Edition.
 2. .NET 10 SDK: `winget install Microsoft.DotNet.SDK.10`
-3. JDK 25 (for the Fabric mods, from M3).
+3. JDK 25 (protocol reader and Fabric mods). Python 3.11+ (protocol generator, course converter).
 4. Deadworks, pinned in `deadworks.version`. Download it and install it into Deadlock (this only adds files):
    ```
    .\tools\get-deadworks.ps1 -Install
    ```
-5. Build a plugin (it deploys itself into Deadlock when Deadworks is installed):
+5. Build the plugin (it deploys itself into Deadlock when Deadworks is installed):
    ```
-   dotnet build spikes/collider-test
+   dotnet build deadworks-plugin
    ```
-6. Start a local server, then in Deadlock's console run `connect localhost:27067`:
+6. Host map, once. Needs CSDK 12 in `C:\tools\Reduced_CSDK_12` (setup in [docs/feel-test.md](docs/feel-test.md)):
    ```
-   .\tools\run-server.ps1
+   .\tools\compile-map.ps1
    ```
+7. Start a local server, then in Deadlock's console run `connect localhost:27067` (and `mat_fullbright 1`; the map is unlit):
+   ```
+   .\tools\run-server.ps1 -Map deadcraft_void
+   ```
+8. Watch the bridge live:
+   ```
+   protocol\java\gradlew -p protocol\java run
+   ```
+9. Tests: `dotnet test protocol/csharp/tests` and `protocol\java\gradlew -p protocol\java test`. After editing the protocol: `python protocol/generate.py`.
 
 ## License
 
