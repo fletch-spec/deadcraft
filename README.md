@@ -45,7 +45,7 @@ Filled in as each component lands.
 3. JDK 25 (for the Fabric mods, from M3).
 4. Deadworks, pinned in `deadworks.version`. Download it and install it into Deadlock (this only adds files):
    ```
-   .	ools\get-deadworks.ps1 -Install
+   .\tools\get-deadworks.ps1 -Install
    ```
 5. Build a plugin (it deploys itself into Deadlock when Deadworks is installed):
    ```
@@ -53,7 +53,7 @@ Filled in as each component lands.
    ```
 6. Start a local server, then in Deadlock's console run `connect localhost:27067`:
    ```
-   .	oolsun-server.ps1
+   .\tools\run-server.ps1
    ```
 
 ## License
