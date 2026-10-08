@@ -41,7 +41,7 @@ final class Overlay {
 	private static final MethodHandle FIND_WINDOW, FIND_WINDOW_EX, GET_WINDOW_THREAD_PROCESS_ID, GET_WINDOW_LONG_PTR,
 		SET_WINDOW_LONG_PTR, SET_WINDOW_POS, SET_LAYERED_WINDOW_ATTRIBUTES, GET_CLIENT_RECT, CLIENT_TO_SCREEN, GET_WINDOW_RECT,
 		GET_ASYNC_KEY_STATE, GET_FOREGROUND_WINDOW, SET_FOREGROUND_WINDOW, ATTACH_THREAD_INPUT, GET_CURRENT_THREAD_ID,
-		GET_CURRENT_PROCESS_ID, IS_WINDOW, IS_ICONIC;
+		GET_CURRENT_PROCESS_ID, IS_WINDOW, IS_ICONIC, IS_WINDOW_VISIBLE, GET_WINDOW_TEXT_LENGTH;
 
 	static {
 		Linker linker = Linker.nativeLinker();
@@ -68,6 +68,8 @@ final class Overlay {
 		GET_CURRENT_PROCESS_ID = linker.downcallHandle(kernel32.find("GetCurrentProcessId").orElseThrow(), FunctionDescriptor.of(JAVA_INT));
 		IS_WINDOW = linker.downcallHandle(user32.find("IsWindow").orElseThrow(), FunctionDescriptor.of(JAVA_INT, ADDRESS));
 		IS_ICONIC = linker.downcallHandle(user32.find("IsIconic").orElseThrow(), FunctionDescriptor.of(JAVA_INT, ADDRESS));
+		IS_WINDOW_VISIBLE = linker.downcallHandle(user32.find("IsWindowVisible").orElseThrow(), FunctionDescriptor.of(JAVA_INT, ADDRESS));
+		GET_WINDOW_TEXT_LENGTH = linker.downcallHandle(user32.find("GetWindowTextLengthW").orElseThrow(), FunctionDescriptor.of(JAVA_INT, ADDRESS));
 	}
 
 	private boolean enabled = true;
@@ -222,18 +224,21 @@ final class Overlay {
 		}
 	}
 
-	/** This process's GLFW window (class "GLFW30"). */
+	/**
+	 * This process's main window: the visible top-level window with a title. Walks every top-level
+	 * window rather than relying on GLFW's window class name, which changes between LWJGL versions.
+	 */
 	private static MemorySegment findOwnWindow() throws Throwable {
 		int pid = (int) GET_CURRENT_PROCESS_ID.invoke();
 		try (Arena arena = Arena.ofConfined()) {
-			MemorySegment cls = arena.allocateFrom("GLFW30", StandardCharsets.UTF_16LE);
 			MemorySegment pidOut = arena.allocate(JAVA_INT);
 			MemorySegment w = MemorySegment.NULL;
 			while (true) {
-				w = (MemorySegment) FIND_WINDOW_EX.invoke(MemorySegment.NULL, w, cls, MemorySegment.NULL);
+				w = (MemorySegment) FIND_WINDOW_EX.invoke(MemorySegment.NULL, w, MemorySegment.NULL, MemorySegment.NULL);
 				if (w.address() == 0) return MemorySegment.NULL;
 				int thread = (int) GET_WINDOW_THREAD_PROCESS_ID.invoke(w, pidOut);
-				if (pidOut.get(JAVA_INT, 0) == pid) return w;
+				if (pidOut.get(JAVA_INT, 0) != pid) continue;
+				if ((int) IS_WINDOW_VISIBLE.invoke(w) != 0 && (int) GET_WINDOW_TEXT_LENGTH.invoke(w) > 0) return w;
 			}
 		}
 	}
