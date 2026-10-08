@@ -74,3 +74,10 @@ If a command says `no hero pawn`, you haven't spawned yet.
 4. Budget: around 1000 colliders alive, and a few dozen moved per tick at most.
 
 **Still unverified:** the 256 pool spawned by the lane (the log confirms it) but wasn't visible, most likely because the grid always grows toward +x/+y from the spawn point. Doesn't affect the results above.
+
+## Collider model and host map (2026-10-08, later)
+
+- **`wood_crate_64` floors have ridges.** Its collision follows the planks, so scaled crates leave raised rims at every seam. Fine for single blocks, wrong for merged floors.
+- **`cube_100_preview` has no collision** (no physics data in the `.vmdl_c`).
+- **`models/test/cube_test/citadel_center_cube_01` is solid and flat.** Bounds (-39.5, -39.7, -39.4) to (39.9, 39.7, 39.6), origin at the centre. Scaled floors walk smoothly. **This is the collider model** until we ship our own.
+- **Stock maps are the wrong host.** dl_midtown has a low playable ceiling: the hero is moved back to the ground within 0.25 s of a teleport about 3000 units up, and is boxed in about 1.5 blocks above a course built 1000 up. `start` is the same playable map. `hero_testing` doesn't run on a dedicated server (the server exits). Next: a custom empty "void" map built once with CSDK 12.

@@ -27,8 +27,7 @@ public class ColliderTest : DeadworksPluginBase
 
 	public override void OnPrecacheResources()
 	{
-		Precache.AddResource(CrateModel);
-		Precache.AddResource(CubeModel);
+		foreach (var model in FloorModels.Values) Precache.AddResource(model);
 	}
 
 	public override void OnUnload() => ClearAll();
@@ -110,8 +109,12 @@ public class ColliderTest : DeadworksPluginBase
 	// ---- Feel test course (docs/feel-test.md) ----------------------------------------------------
 	// Units per Minecraft block, decided from the collider test. Moves to /protocol in M2.
 	private const float UnitsPerBlock = 64f;
-	// wood_crate_64 is 64 x 64 wide but 66.5 tall, so crates are placed by their top face.
-	private const float CrateHeight = 66.5f;
+	// Course collider: Deadlock's test cube. Its collision is a clean box (the crate's follows its
+	// planks, which left ridges on scaled floors). Origin at its centre; bounds from dc_floor:
+	// mins (-39.5, -39.7, -39.4), maxs (39.9, 39.7, 39.6), so about 79.4 units per side.
+	private const string BlockModel = "models/test/cube_test/citadel_center_cube_01.vmdl";
+	private const float BlockModelSize = 79.4f;
+	private const float BlockModelTop = 39.6f;
 	// The superflat export has 4 floor layers (bedrock, dirt, dirt, grass) under the course.
 	private const int CourseFloorBlocks = 4;
 	private static readonly string CourseDir = Path.Combine(
@@ -125,7 +128,7 @@ public class ColliderTest : DeadworksPluginBase
 		anchor + new Vector3(x * UnitsPerBlock, -z * UnitsPerBlock, y * UnitsPerBlock);
 
 	[Command("dc_build", Description = "dc_build <course> [height]: build a converted .nbt course in the air above you")]
-	public void CmdBuild(CCitadelPlayerController caller, string name = "feel1", float height = 3000f)
+	public void CmdBuild(CCitadelPlayerController caller, string name = "feel1", float height = 400f)
 	{
 		if (caller.GetHeroPawn() is not { } pawn) { Say(caller, "no hero pawn"); return; }
 		string file = Path.Combine(CourseDir, name + ".json");
@@ -143,12 +146,54 @@ public class ColliderTest : DeadworksPluginBase
 		foreach (var b in course.Boxes)
 		{
 			float x = b[0], y = b[1], z = b[2], s = b[3];
-			var topCenter = ToSource(anchor, x + s / 2f, y + s, z + s / 2f);
-			if (SpawnBox(CrateModel, topCenter - new Vector3(0, 0, CrateHeight * s), true, s) != null) spawned++;
+			// Scale so one side is s blocks, then put the box's top exactly at y + s.
+			float scale = s * UnitsPerBlock / BlockModelSize;
+			var top = ToSource(anchor, x + s / 2f, y + s, z + s / 2f);
+			if (SpawnBox(BlockModel, top - new Vector3(0, 0, BlockModelTop * scale), true, scale) != null) spawned++;
 		}
 		_courseAnchor = anchor;
 		Say(caller, $"built {course.Name}: {spawned}/{course.Boxes.Length} colliders, anchor {Fmt(anchor)}");
 		TeleportToCourse(pawn);
+	}
+
+	// Seam test: a 3 x 3 floor of 4-block tiles, top 1 block above your feet, to see whether a model's
+	// collision is a clean box (the scaled crate floor has ridges at its edges).
+	private static readonly Dictionary<string, string> FloorModels = new()
+	{
+		["crate"] = CrateModel,
+		["cube"] = CubeModel,
+		["center"] = BlockModel,
+	};
+
+	[Command("dc_floor", Description = "dc_floor [crate|cube|center]: 3x3 floor of 4-block tiles 500 units ahead")]
+	public void CmdFloor(CCitadelPlayerController caller, string model = "cube")
+	{
+		if (caller.GetHeroPawn() is not { } pawn) { Say(caller, "no hero pawn"); return; }
+		if (!FloorModels.TryGetValue(model, out var path)) { Say(caller, "models: crate, cube, center"); return; }
+		var probe = SpawnBox(path, pawn.Position + new Vector3(0, 0, -10000f), true);
+		if (probe?.Collision is not { } pc) { Say(caller, "spawn failed"); return; }
+		Vector3 mins = pc.Mins, maxs = pc.Maxs;
+		float scale = 4f * UnitsPerBlock / (maxs.X - mins.X);
+		var center = pawn.Position + Forward(pawn.CameraAngles) * 500f;
+		float tile = 4f * UnitsPerBlock;
+		for (int i = -1; i <= 1; i++)
+			for (int j = -1; j <= 1; j++)
+			{
+				// Place so the bounds' top sits one block above the hero's feet.
+				var origin = center + new Vector3(i * tile, j * tile, UnitsPerBlock - maxs.Z * scale);
+				SpawnBox(path, origin, true, scale);
+			}
+		Say(caller, $"floor of {model}: bounds mins={Fmt(mins)} maxs={Fmt(maxs)}, scale {scale:F3}");
+	}
+
+	// The map's world entity (index 0) bounds tell us how high a course can go.
+	[Command("dc_bounds", Description = "Print the map's world bounds")]
+	public void CmdBounds(CCitadelPlayerController caller)
+	{
+		var world = CBaseEntity.FromIndex(0);
+		var col = world?.Collision;
+		Say(caller, $"world {world?.Classname}: mins={Fmt(col?.Mins)} maxs={Fmt(col?.Maxs)}");
+		if (caller.GetHeroPawn() is { } pawn) Say(caller, $"you are at {Fmt(pawn.Position)}");
 	}
 
 	[Command("dc_course", Description = "Teleport back to the start of the built course")]
@@ -164,6 +209,24 @@ public class ColliderTest : DeadworksPluginBase
 	{
 		var start = ToSource(_courseAnchor!.Value, 1.5f, CourseFloorBlocks, 1.5f) + new Vector3(0, 0, 8f);
 		pawn.TeleportWithView(start, Vector3.Zero);
+		Log($"teleported to course start {Fmt(start)}");
+		_trackPawn = pawn;
+		_trackUntil = GlobalVars.CurTime + 3f;
+		_trackNext = 0f;
+	}
+
+	// After a course teleport, log where the hero actually is for 3 s, to catch the map moving it.
+	private CCitadelPlayerPawn? _trackPawn;
+	private float _trackUntil, _trackNext;
+
+	private void TrackPawn(float t)
+	{
+		if (_trackPawn == null) return;
+		if (t > _trackUntil || !_trackPawn.IsValid) { _trackPawn = null; return; }
+		if (t < _trackNext) return;
+		_trackNext = t + 0.25f;
+		Log($"track t+{3f - (_trackUntil - t):F2}s pos={Fmt(_trackPawn.Position)} vel={Fmt(_trackPawn.AbsVelocity)} " +
+			$"ground={_trackPawn.IsOnGround} alive={_trackPawn.IsAlive}");
 	}
 
 	[Command("dc_clear", Description = "Remove every test box")]
@@ -178,6 +241,7 @@ public class ColliderTest : DeadworksPluginBase
 	{
 		if (!simulating) return;
 		float t = GlobalVars.CurTime;
+		TrackPawn(t);
 
 		if (_mover != null)
 		{
