@@ -2,7 +2,7 @@
 
 Play on a Minecraft Java server as a real Deadlock hero (first target: Celeste). Deadlock's own engine supplies the movement and abilities; Minecraft supplies the world, blocks, mobs, other players and the picture you look at.
 
-> **Status: M3 done, next M4.** Reports: [feasibility](docs/feasibility.md), [collider test](docs/collider-test.md), [feel test](docs/feel-test.md), [M2](docs/m2-report.md), [M3](docs/m3-report.md). Minecraft follows the Deadlock hero smoothly in singleplayer; Minecraft's blocks don't collide in Deadlock yet (M4).
+> **Status: M4 done, next M5.** Reports: [feasibility](docs/feasibility.md), [collider test](docs/collider-test.md), [feel test](docs/feel-test.md), [M2](docs/m2-report.md), [M3](docs/m3-report.md), [M4](docs/m4-report.md). A Deadlock hero walks a Minecraft singleplayer world with Minecraft's blocks as live Deadlock colliders.
 
 ## How it works
 

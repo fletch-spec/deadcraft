@@ -110,5 +110,13 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		return HookResult.Continue;
 	}
 
-	private static void Log(string text) => Console.WriteLine($"[deadcraft] {text}");
+	// Also appended to %TEMP%\deadcraft-plugin.log: the server console can't be captured.
+	private static readonly string LogPath = Path.Combine(Path.GetTempPath(), "deadcraft-plugin.log");
+
+	private static void Log(string text)
+	{
+		string line = $"[deadcraft] {text}";
+		Console.WriteLine(line);
+		try { File.AppendAllText(LogPath, $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}"); } catch (IOException) { }
+	}
 }
