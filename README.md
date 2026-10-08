@@ -2,7 +2,7 @@
 
 Play on a Minecraft Java server as a real Deadlock hero (first target: Celeste). Deadlock's own engine supplies the movement and abilities; Minecraft supplies the world, blocks, mobs, other players and the picture you look at.
 
-> **Status: M2 done, next M3.** Reports: [feasibility](docs/feasibility.md), [collider test](docs/collider-test.md), [feel test](docs/feel-test.md), [M2](docs/m2-report.md). The plugin streams the Deadlock hero's state over shared memory at 64 Hz and a Java reader prints it live.
+> **Status: M3 done, next M4.** Reports: [feasibility](docs/feasibility.md), [collider test](docs/collider-test.md), [feel test](docs/feel-test.md), [M2](docs/m2-report.md), [M3](docs/m3-report.md). Minecraft follows the Deadlock hero smoothly in singleplayer; Minecraft's blocks don't collide in Deadlock yet (M4).
 
 ## How it works
 
@@ -29,7 +29,7 @@ Play on a Minecraft Java server as a real Deadlock hero (first target: Celeste).
 |---|---|---|
 | `protocol/` | Shared-memory layout (one schema, generated C# and Java bindings, golden fixture), live reader. [README](protocol/README.md) | M2 |
 | `deadworks-plugin/` | C# Deadworks plugin: writes hero state and ability casts every tick | M2 |
-| `fabric-client/` | Fabric client mod, Minecraft 26.3 | M3 |
+| `fabric-client/` | Fabric client mod, Minecraft 26.3: follows the Deadlock hero, vanilla fallback. `gradlew runClient` | M3 |
 | `fabric-server/` | Fabric server mod, Minecraft 26.3 | M5 |
 | `docs/` | Feasibility, feel test, collider test | M0+ |
 | `tools/` | `get-deadworks.ps1` (pinned Deadworks), `run-server.ps1` (local server), `compile-map.ps1` (void map), `nbt-to-colliders.py` (structure → colliders) | M1 |
@@ -65,7 +65,11 @@ Filled in as each component lands.
    ```
    protocol\java\gradlew -p protocol\java run
    ```
-9. Tests: `dotnet test protocol/csharp/tests` and `protocol\java\gradlew -p protocol\java test`. After editing the protocol: `python protocol/generate.py`.
+9. Dev Minecraft client (creative superflat world, then `/deadcraft` in chat):
+   ```
+   fabric-client\gradlew -p fabric-client runClient
+   ```
+10. Tests: `dotnet test protocol/csharp/tests` and `protocol\java\gradlew -p protocol\java test`. After editing the protocol: `python protocol/generate.py`.
 
 ## License
 
