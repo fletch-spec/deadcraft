@@ -27,7 +27,7 @@ public abstract class CameraMixin {
 	protected abstract void setPosition(double x, double y, double z);
 
 	@Shadow
-	protected abstract void move(float forward, float up, float left);
+	protected abstract void move(float forward, float up, float right);
 
 	@Shadow
 	private float getMaxZoom(float distance) {
@@ -40,7 +40,7 @@ public abstract class CameraMixin {
 		detached = true;
 		// Follow places the player exactly every frame (xo == x), so no partial-tick lerp is needed.
 		setPosition(entity.getX(), entity.getY() + DeadlockCamera.eyeHeightBlocks(), entity.getZ());
-		move(0f, DeadlockCamera.upBlocks(), -DeadlockCamera.rightBlocks());
+		move(0f, DeadlockCamera.upBlocks(), DeadlockCamera.rightBlocks());  // the third axis points right in 26.3
 		move(-getMaxZoom(DeadlockCamera.distanceBlocks()), 0f, 0f);
 	}
 }
