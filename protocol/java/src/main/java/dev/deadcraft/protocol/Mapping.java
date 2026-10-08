@@ -29,6 +29,7 @@ public final class Mapping implements AutoCloseable {
 	private static final int FILE_MAP_READ = 0x04;
 	private static final int FILE_MAP_ALL_ACCESS = 0xF001F;
 	private static final long INVALID_HANDLE_VALUE = -1;
+	private static final int SEQLOCK_ATTEMPTS = 10_000;
 
 	private static final MethodHandle CREATE_FILE_MAPPING, OPEN_FILE_MAPPING, MAP_VIEW_OF_FILE, UNMAP_VIEW_OF_FILE,
 		CLOSE_HANDLE, GET_TICK_COUNT64, GET_CURRENT_PROCESS_ID;
@@ -134,10 +135,14 @@ public final class Mapping implements AutoCloseable {
 		return Header.read(copy(Header.OFFSET, Header.SIZE), 0);
 	}
 
-	/** Reads hero state under the seqlock; empty if the writer was mid-update every try. */
+	/**
+	 * Reads hero state under the seqlock; empty only if the writer stayed mid-update for the whole
+	 * retry budget (about a millisecond). A write takes microseconds, so retries must wait, not just loop.
+	 */
 	public Optional<HeroState> readHeroState() {
 		long seqAt = HeroState.OFFSET + HeroState.SEQ_AT;
-		for (int attempt = 0; attempt < 8; attempt++) {
+		for (int attempt = 0; attempt < SEQLOCK_ATTEMPTS; attempt++) {
+			if (attempt > 0) Thread.onSpinWait();
 			int before = view.get(INT, seqAt);
 			VarHandle.acquireFence();
 			if ((before & 1) != 0) continue;

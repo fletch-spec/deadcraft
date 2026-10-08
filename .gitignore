@@ -39,3 +39,10 @@ courses/*.json
 
 # Our own Hammer map sources are committed; compiled maps are not.
 !maps/*.vmap
+
+# Fabric/Gradle
+fabric-client/.gradle/
+fabric-client/run/
+fabric-client/build/
+protocol/java/.gradle/
+protocol/java/build/

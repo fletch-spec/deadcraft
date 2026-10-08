@@ -82,13 +82,16 @@ public sealed unsafe class Mapping : IDisposable
 		Volatile.Write(ref seq, start + 1);       // even: stable
 	}
 
-	/// <summary>Reads hero state; false if the writer was mid-update every try.</summary>
+	/// <summary>Reads hero state; false only if the writer stayed mid-update for the whole retry budget
+	/// (about a millisecond). A write takes microseconds, so retries must wait, not just loop.</summary>
 	public bool TryReadHeroState(out HeroState state)
 	{
 		ref uint seq = ref *(uint*)(_base + HeroState.Offset + HeroState.SeqAt);
 		Span<byte> copy = stackalloc byte[HeroState.Size];
-		for (int attempt = 0; attempt < 8; attempt++)
+		var spin = new SpinWait();
+		for (int attempt = 0; attempt < 10_000; attempt++)
 		{
+			if (attempt > 0) spin.SpinOnce(sleep1Threshold: -1);
 			uint before = Volatile.Read(ref seq);
 			if ((before & 1) != 0) continue;
 			Region(HeroState.Offset, HeroState.Size).CopyTo(copy);

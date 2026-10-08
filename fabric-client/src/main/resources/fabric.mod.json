@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "deadcraft",
+  "version": "${version}",
+  "name": "Deadcraft",
+  "description": "Play as a Deadlock hero: Deadlock's engine moves you, Minecraft draws the world.",
+  "authors": ["Fletcher C."],
+  "contact": { "sources": "https://github.com/fletch-spec/deadcraft" },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.deadcraft.client.DeadcraftClient"]
+  },
+  "mixins": ["deadcraft.client.mixins.json"],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
