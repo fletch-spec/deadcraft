@@ -36,3 +36,6 @@ local.props
 
 # Converted courses are generated from the .nbt by tools/nbt-to-colliders.py
 courses/*.json
+
+# Our own Hammer map sources are committed; compiled maps are not.
+!maps/*.vmap
