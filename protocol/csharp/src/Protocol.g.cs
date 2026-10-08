@@ -10,13 +10,16 @@ namespace Deadcraft.Protocol;
 public static partial class Proto
 {
 	public const uint Magic = 0x54464344;
-	public const uint Version = 1;
+	public const uint Version = 2;
 	public const string MappingName = @"Local\Deadcraft";
 	public const int MappingSize = 65536;
 	public const float UnitsPerBlock = 64.0f;
 
 	public const int AbilityEventsOffset = 0x200;
 	public const int AbilityEventsCapacity = 32;
+
+	public const int CubesOffset = 0x1040;
+	public const int CubesCapacity = 2048;
 
 	/// <summary>Deadlock (Source) units to Minecraft blocks: mc = (x, z, -y) / UnitsPerBlock.</summary>
 	public static Vector3 ToMinecraft(Vector3 source) =>
@@ -37,6 +40,12 @@ public static partial class Proto
 	}
 }
 
+/// <summary>Three ints (protocol type ivec3).</summary>
+public readonly record struct Int3(int X, int Y, int Z);
+
+/// <summary>Three doubles (protocol type dvec3).</summary>
+public readonly record struct Double3(double X, double Y, double Z);
+
 [Flags]
 public enum HeroFlags : uint
 {
@@ -44,6 +53,13 @@ public enum HeroFlags : uint
 	Present = 1u << 0,
 	Alive = 1u << 1,
 	OnGround = 1u << 2,
+}
+
+[Flags]
+public enum McFlags : uint
+{
+	None = 0,
+	Linked = 1u << 0,
 }
 
 public enum AbilityEventKind : uint
@@ -211,5 +227,84 @@ public struct AbilityEvent
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(KindAt), Kind);
 		BinaryPrimitives.WriteUInt64LittleEndian(s.Slice(TickAt), Tick);
 		Proto.WriteUtf8(s.Slice(AbilityNameAt, 48), AbilityName);
+	}
+}
+
+/// <summary>Minecraft -> Deadlock. Seqlock: seq is odd while the client writes; the seqlock also covers the cube_count entries of Cubes. The client rewrites both only when the set changes (generation bumps).</summary>
+public struct McState
+{
+	public const int Offset = 0x1000;
+	public const int Size = 0x40;
+	public const int SeqAt = 0x0;
+	public const int FlagsAt = 0x4;
+	public const int GenerationAt = 0x8;
+	public const int CubeCountAt = 0xC;
+	public const int BaseAt = 0x10;
+	public const int FrameOffsetAt = 0x20;
+
+	public uint Seq;
+	public uint Flags; // McFlags
+	public uint Generation; // bumps whenever the cube set or the offset changes
+	public uint CubeCount;
+	public Int3 Base; // Minecraft block coordinates that cube positions are relative to
+	public Double3 FrameOffset; // added to Minecraft block coordinates gives hero-frame blocks: source = to_source(mc + offset)
+
+	public McState() { }
+
+	/// <summary>Decode from a span that starts at this struct.</summary>
+	public static McState Read(ReadOnlySpan<byte> s) => new()
+	{
+		Seq = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(SeqAt)),
+		Flags = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(FlagsAt)),
+		Generation = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(GenerationAt)),
+		CubeCount = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(CubeCountAt)),
+		Base = new Int3(BinaryPrimitives.ReadInt32LittleEndian(s.Slice(BaseAt + 0)), BinaryPrimitives.ReadInt32LittleEndian(s.Slice(BaseAt + 4)), BinaryPrimitives.ReadInt32LittleEndian(s.Slice(BaseAt + 8))),
+		FrameOffset = new Double3(BinaryPrimitives.ReadDoubleLittleEndian(s.Slice(FrameOffsetAt + 0)), BinaryPrimitives.ReadDoubleLittleEndian(s.Slice(FrameOffsetAt + 8)), BinaryPrimitives.ReadDoubleLittleEndian(s.Slice(FrameOffsetAt + 16))),
+	};
+
+	/// <summary>Encode into a span that starts at this struct.</summary>
+	public readonly void Write(Span<byte> s)
+	{
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(SeqAt), Seq);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(FlagsAt), Flags);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(GenerationAt), Generation);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(CubeCountAt), CubeCount);
+		BinaryPrimitives.WriteInt32LittleEndian(s.Slice(BaseAt + 0), Base.X); BinaryPrimitives.WriteInt32LittleEndian(s.Slice(BaseAt + 4), Base.Y); BinaryPrimitives.WriteInt32LittleEndian(s.Slice(BaseAt + 8), Base.Z);
+		BinaryPrimitives.WriteDoubleLittleEndian(s.Slice(FrameOffsetAt + 0), FrameOffset.X); BinaryPrimitives.WriteDoubleLittleEndian(s.Slice(FrameOffsetAt + 8), FrameOffset.Y); BinaryPrimitives.WriteDoubleLittleEndian(s.Slice(FrameOffsetAt + 16), FrameOffset.Z);
+	}
+}
+
+/// <summary>An axis-aligned cube of solid space. Position is its minimum corner in half blocks relative to McState.base (times 2); edge is its size in half blocks (1, 2, 4, 8 or 16) and position is a multiple of it.</summary>
+public struct Cube
+{
+	public const int Size = 0x8;
+	public const int XAt = 0x0;
+	public const int YAt = 0x2;
+	public const int ZAt = 0x4;
+	public const int EdgeAt = 0x6;
+
+	public short X;
+	public short Y;
+	public short Z;
+	public byte Edge; // edge length in half blocks
+
+	public Cube() { }
+
+	/// <summary>Decode from a span that starts at this struct.</summary>
+	public static Cube Read(ReadOnlySpan<byte> s) => new()
+	{
+		X = BinaryPrimitives.ReadInt16LittleEndian(s.Slice(XAt)),
+		Y = BinaryPrimitives.ReadInt16LittleEndian(s.Slice(YAt)),
+		Z = BinaryPrimitives.ReadInt16LittleEndian(s.Slice(ZAt)),
+		Edge = s[EdgeAt],
+	};
+
+	/// <summary>Encode into a span that starts at this struct.</summary>
+	public readonly void Write(Span<byte> s)
+	{
+		BinaryPrimitives.WriteInt16LittleEndian(s.Slice(XAt), X);
+		BinaryPrimitives.WriteInt16LittleEndian(s.Slice(YAt), Y);
+		BinaryPrimitives.WriteInt16LittleEndian(s.Slice(ZAt), Z);
+		s[EdgeAt] = Edge;
 	}
 }

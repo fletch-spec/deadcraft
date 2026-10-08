@@ -1,8 +1,8 @@
-# Golden test vector for protocol v1. generate.py encodes these values into v1.bin with its own
+# Golden test vector for the current protocol version. generate.py encodes these values into v1.bin with its own
 # encoder; the C# and Java tests must produce exactly those bytes and read them back to these values.
 # Floats are exactly representable so all three sides agree bit for bit.
 Header.magic = 0x54464344
-Header.version = 1
+Header.version = 2
 Header.mapping_size = 65536
 Header.units_per_block = 64.0
 Header.deadlock_pid = 4242
@@ -33,3 +33,23 @@ AbilityEvents[1].serial = 2
 AbilityEvents[1].kind = 1
 AbilityEvents[1].tick = 9876543100
 AbilityEvents[1].ability_name = ability_unicorn_spirit_jet
+
+McState.seq = 8
+McState.flags = 1
+McState.generation = 3
+McState.cube_count = 3
+McState.base = -120, -64, 300000
+McState.frame_offset = 1234.5, -48.25, -299990.5
+
+Cubes[0].x = 0
+Cubes[0].y = 0
+Cubes[0].z = 0
+Cubes[0].edge = 16
+Cubes[1].x = -2
+Cubes[1].y = 8
+Cubes[1].z = 30
+Cubes[1].edge = 2
+Cubes[2].x = 31
+Cubes[2].y = 9
+Cubes[2].z = -1
+Cubes[2].edge = 1

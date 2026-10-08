@@ -3,20 +3,24 @@ package dev.deadcraft.protocol;
 
 import java.util.List;
 
-/** The values in protocol/golden/v1.values, as code. */
+/** The values in protocol/golden/golden.values, as code. */
 final class Golden {
 	private Golden() {}
 
-	static final int EXTENT = 0xA00;
+	static final int EXTENT = 0x5040;
 
 	record At(int offset, Object value) {}
 
 	static List<At> structs() {
 		return List.of(
-			new At(0x0, make(new Header(), v -> { v.magic = 1413890884; v.version = 1; v.mappingSize = 65536; v.unitsPerBlock = 64.0f; v.deadlockPid = 4242; v.minecraftPid = 31337; v.deadlockHeartbeatMs = 123456789012L; v.minecraftHeartbeatMs = 123456789000L; })),
+			new At(0x0, make(new Header(), v -> { v.magic = 1413890884; v.version = 2; v.mappingSize = 65536; v.unitsPerBlock = 64.0f; v.deadlockPid = 4242; v.minecraftPid = 31337; v.deadlockHeartbeatMs = 123456789012L; v.minecraftHeartbeatMs = 123456789000L; })),
 			new At(0x100, make(new HeroState(), v -> { v.seq = 42; v.flags = 7; v.tick = 9876543210L; v.serverTime = 154.25f; v.heroId = 60; v.position = new Vec3(-1440.0f, 1440.0f, 256.5f); v.velocity = new Vec3(305.25f, -33.5f, 0.0f); v.eyePosition = new Vec3(-1440.0f, 1440.0f, 342.5f); v.cameraAngles = new Vec3(-35.25f, 35.5f, 0.0f); v.stamina = 3.0f; v.staminaMax = 4.0f; v.health = 756; v.healthMax = 822; v.abilityEventSerial = 2; })),
+			new At(0x1000, make(new McState(), v -> { v.seq = 8; v.flags = 1; v.generation = 3; v.cubeCount = 3; v.base = new Int3(-120, -64, 300000); v.frameOffset = new Double3(1234.5, -48.25, -299990.5); })),
 			new At(0x200, make(new AbilityEvent(), v -> { v.serial = 1; v.kind = 1; v.tick = 9876543000L; v.abilityName = "citadel_ability_dash"; })),
-			new At(0x240, make(new AbilityEvent(), v -> { v.serial = 2; v.kind = 1; v.tick = 9876543100L; v.abilityName = "ability_unicorn_spirit_jet"; }))
+			new At(0x240, make(new AbilityEvent(), v -> { v.serial = 2; v.kind = 1; v.tick = 9876543100L; v.abilityName = "ability_unicorn_spirit_jet"; })),
+			new At(0x1040, make(new Cube(), v -> { v.x = (short) 0; v.y = (short) 0; v.z = (short) 0; v.edge = 16; })),
+			new At(0x1048, make(new Cube(), v -> { v.x = (short) -2; v.y = (short) 8; v.z = (short) 30; v.edge = 2; })),
+			new At(0x1050, make(new Cube(), v -> { v.x = (short) 31; v.y = (short) 9; v.z = (short) -1; v.edge = 1; }))
 		);
 	}
 

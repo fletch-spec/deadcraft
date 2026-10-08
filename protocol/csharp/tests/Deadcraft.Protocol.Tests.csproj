@@ -15,7 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Deadcraft.Protocol.csproj" />
-    <None Include="..\..\golden\v1.bin" Link="golden\v1.bin" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\golden\golden.bin" Link="golden\golden.bin" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

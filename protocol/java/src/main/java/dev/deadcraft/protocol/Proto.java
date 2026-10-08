@@ -6,13 +6,16 @@ public final class Proto {
 	private Proto() {}
 
 	public static final int MAGIC = 0x54464344;
-	public static final int VERSION = 1;
+	public static final int VERSION = 2;
 	public static final String MAPPING_NAME = "Local\\Deadcraft";
 	public static final int MAPPING_SIZE = 65536;
 	public static final float UNITS_PER_BLOCK = 64.0f;
 
 	public static final int ABILITY_EVENTS_OFFSET = 0x200;
 	public static final int ABILITY_EVENTS_CAPACITY = 32;
+
+	public static final int CUBES_OFFSET = 0x1040;
+	public static final int CUBES_CAPACITY = 2048;
 
 	/** Deadlock (Source) units to Minecraft blocks: mc = (x, z, -y) / UNITS_PER_BLOCK. */
 	public static Vec3 toMinecraft(Vec3 s) {

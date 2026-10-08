@@ -1,5 +1,5 @@
 // Deadcraft Fabric client: follows the Deadlock hero over the shared-memory bridge.
-//   gradlew build       mod jar in build/libs
+//   gradlew build       mod jar in build/libs (runs the tests)
 //   gradlew runClient   dev client (offline account) for testing in singleplayer
 plugins {
 	id 'net.fabricmc.fabric-loom' version "${loom_version}"
@@ -29,7 +29,13 @@ dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	testImplementation platform('org.junit:junit-bom:5.13.4')
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
+
+test { useJUnitPlatform() }
 
 processResources {
 	inputs.property 'version', project.version

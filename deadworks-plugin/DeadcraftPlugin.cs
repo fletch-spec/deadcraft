@@ -14,6 +14,9 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	public override string Name => "Deadcraft";
 
 	private Mapping? _mapping;
+	private readonly ColliderPool _colliders = new();
+	private readonly List<Cube> _cubes = new();
+	private uint _cubeGeneration;
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
 
@@ -30,8 +33,11 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		}
 	}
 
+	public override void OnPrecacheResources() => Precache.AddResource(ColliderPool.Model);
+
 	public override void OnUnload()
 	{
+		_colliders.Clear();
 		if (_mapping == null) return;
 		_mapping.WriteHeroState(new HeroState());  // flags 0: no hero
 		_mapping.Dispose();
@@ -63,6 +69,17 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			state.HealthMax = hero.GetMaxHealth();
 		}
 		_mapping.WriteHeroState(state);
+		SyncColliders();
+	}
+
+	// Rebuild colliders when the Minecraft client publishes a new cube set. While it isn't linked
+	// (generation bumps with flags 0) the colliders stay, so the hero doesn't drop through the world.
+	private void SyncColliders()
+	{
+		if (!_mapping!.TryReadMcState(_cubeGeneration, out var mc, _cubes) || mc.Generation == _cubeGeneration) return;
+		_cubeGeneration = mc.Generation;
+		if ((mc.Flags & (uint)McFlags.Linked) == 0) return;
+		Log(_colliders.Apply(mc, _cubes));
 	}
 
 	// The human player's hero, re-found when it changes (respawn, hero swap, reconnect).

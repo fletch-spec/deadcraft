@@ -5,7 +5,7 @@ namespace Deadcraft.Protocol.Tests;
 
 public class ProtocolTests
 {
-	private static readonly byte[] GoldenBytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden", "v1.bin"));
+	private static readonly byte[] GoldenBytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, "golden", "golden.bin"));
 
 	[Fact]
 	public void EncodesTheGoldenFixture()
@@ -19,6 +19,8 @@ public class ProtocolTests
 				case Header h: h.Write(span); break;
 				case HeroState s: s.Write(span); break;
 				case AbilityEvent e: e.Write(span); break;
+				case McState m: m.Write(span); break;
+				case Cube c: c.Write(span); break;
 				default: throw new InvalidOperationException(value.GetType().Name);
 			}
 		}
@@ -36,6 +38,8 @@ public class ProtocolTests
 				Header => Header.Read(span),
 				HeroState => HeroState.Read(span),
 				AbilityEvent => AbilityEvent.Read(span),
+				McState => McState.Read(span),
+				Cube => Cube.Read(span),
 				_ => throw new InvalidOperationException(expected.GetType().Name),
 			};
 			Assert.Equal(expected, actual);
@@ -67,6 +71,25 @@ public class ProtocolTests
 		Assert.Equal(500, read.Health);
 		Assert.Equal("citadel_ability_dash", mapping.TryReadAbilityEvent(1)?.AbilityName);
 		Assert.Null(mapping.TryReadAbilityEvent(2));
+	}
+
+	[Fact]
+	public void RoundTripsTheCubeSet()
+	{
+		using var mapping = Mapping.OpenOrCreate($@"Local\DeadcraftTest_{Guid.NewGuid():N}");
+		var cubes = new List<Cube> { new() { X = 0, Y = 0, Z = 0, Edge = 16 }, new() { X = -3, Y = 9, Z = 31, Edge = 1 } };
+		mapping.WriteMcState(new McState { Flags = (uint)McFlags.Linked, Generation = 5, Base = new Int3(10, -64, 20), FrameOffset = new Double3(0.5, 1.5, -2.5) }, cubes);
+
+		var read = new List<Cube>();
+		Assert.True(mapping.TryReadMcState(0, out var state, read));
+		Assert.Equal(5u, state.Generation);
+		Assert.Equal(2u, state.CubeCount);
+		Assert.Equal(new Double3(0.5, 1.5, -2.5), state.FrameOffset);
+		Assert.Equal(cubes, read);
+
+		var untouched = new List<Cube> { new() { Edge = 99 } };
+		Assert.True(mapping.TryReadMcState(5, out _, untouched));
+		Assert.Single(untouched);  // same generation: the cube list isn't copied again
 	}
 
 	[Fact]

@@ -12,7 +12,7 @@
 
 [protocol]
 magic = 0x54464344          # bytes "DCFT"
-version = 1
+version = 2
 mapping_name = 'Local\Deadcraft'
 mapping_size = 65536
 units_per_block = 64.0      # Source units per Minecraft block (docs/collider-test.md)
@@ -23,7 +23,7 @@ minecraft_x = "+source_x"
 minecraft_y = "+source_z"
 minecraft_z = "-source_y"
 
-# Types: u32 i32 u64 f32 vec3 (3 x f32) and utf8[N] (NUL-padded UTF-8).
+# Types: u8 i16 u32 i32 u64 f32 vec3 (3 x f32) ivec3 (3 x i32) dvec3 (3 x f64) and utf8[N] (NUL-padded UTF-8).
 
 [[struct]]
 name = "Header"
@@ -98,8 +98,49 @@ values = [
   { name = "used", value = 1, doc = "player_used_ability" },
 ]
 
-# 0x1000 onward: Minecraft -> Deadlock (block colliders, incoming damage). Defined in a later version.
-[[reserved]]
-name = "MinecraftToDeadlock"
+# ---- Minecraft -> Deadlock ---------------------------------------------------------------------
+
+[[struct]]
+name = "McState"
 offset = 0x1000
-size = 0xF000
+size = 0x40
+seqlock = true
+doc = """Minecraft -> Deadlock. Seqlock: seq is odd while the client writes; the seqlock also covers the cube_count entries of Cubes. The client rewrites both only when the set changes (generation bumps)."""
+fields = [
+  { name = "seq", type = "u32", offset = 0x00 },
+  { name = "flags", type = "u32", offset = 0x04, doc = "McFlags" },
+  { name = "generation", type = "u32", offset = 0x08, doc = "bumps whenever the cube set or the offset changes" },
+  { name = "cube_count", type = "u32", offset = 0x0C },
+  { name = "base", type = "ivec3", offset = 0x10, doc = "Minecraft block coordinates that cube positions are relative to" },
+  { name = "frame_offset", type = "dvec3", offset = 0x20, doc = "added to Minecraft block coordinates gives hero-frame blocks: source = to_source(mc + offset)" },
+]
+
+[[flags]]
+name = "McFlags"
+values = [
+  { name = "linked", bit = 0, doc = "the client is following the hero; cubes and offset are current" },
+]
+
+[[array]]
+name = "Cubes"
+offset = 0x1040
+entry = "Cube"
+capacity = 2048
+doc = "Solid space around the player as grid-aligned cubes, in half blocks. Entries 0 .. McState.cube_count - 1 are valid."
+
+[[struct]]
+name = "Cube"
+size = 0x08
+doc = """An axis-aligned cube of solid space. Position is its minimum corner in half blocks relative to McState.base (times 2); edge is its size in half blocks (1, 2, 4, 8 or 16) and position is a multiple of it."""
+fields = [
+  { name = "x", type = "i16", offset = 0x0 },
+  { name = "y", type = "i16", offset = 0x2 },
+  { name = "z", type = "i16", offset = 0x4 },
+  { name = "edge", type = "u8", offset = 0x6, doc = "edge length in half blocks" },
+]
+
+# 0x5040 onward: free for later Minecraft -> Deadlock data (incoming damage, ability effects).
+[[reserved]]
+name = "Unused"
+offset = 0x5040
+size = 0xAFC0

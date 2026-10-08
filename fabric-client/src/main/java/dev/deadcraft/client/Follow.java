@@ -1,5 +1,6 @@
 package dev.deadcraft.client;
 
+import dev.deadcraft.protocol.Double3;
 import dev.deadcraft.protocol.HeroFlags;
 import dev.deadcraft.protocol.HeroState;
 import dev.deadcraft.protocol.Mapping;
@@ -40,12 +41,20 @@ public final class Follow {
 	private static boolean savedPauseOnLostFocus;
 	private static String lastProblem = "";
 	private static HeroState lastState;
+	private static final BlockExport export = new BlockExport();
 	private static long lastGoodRead;
 
 	private Follow() {}
 
 	public static boolean linked() {
 		return linked;
+	}
+
+	/** Every client tick: heartbeat and block export to Deadlock. */
+	public static void clientTick(Minecraft mc) {
+		if (mapping == null) return;
+		Double3 offset = new Double3(heroAnchor.x() - anchorX, heroAnchor.y() - anchorY, heroAnchor.z() - anchorZ);
+		export.tick(mc, mapping, linked && !anchorRequested, offset);
 	}
 
 	/** Called at the start of every frame, before the world is ticked and drawn. */
@@ -128,16 +137,16 @@ public final class Follow {
 			if (now < nextOpenAttempt) return Optional.empty();
 			nextOpenAttempt = now + REOPEN_INTERVAL_MS;
 			try {
-				mapping = Mapping.openExisting().orElse(null);
-				if (mapping != null) LOG.info("Deadcraft: bridge opened ({})", Proto.MAPPING_NAME);
+				mapping = Mapping.openOrCreate(Proto.MAPPING_NAME);
+				LOG.info("Deadcraft: bridge opened ({})", Proto.MAPPING_NAME);
 			} catch (RuntimeException e) {
 				problem("bridge refused: " + e.getMessage());
 				return Optional.empty();
 			}
-			if (mapping == null) {
-				problem("waiting for Deadlock (no " + Proto.MAPPING_NAME + ")");
-				return Optional.empty();
-			}
+		}
+		if (mapping.readHeader().deadlockPid == 0) {
+			problem("waiting for Deadlock (start the Deadworks server with the Deadcraft plugin)");
+			return Optional.empty();
 		}
 		long age = mapping.deadlockHeartbeatAgeMs();
 		if (age > STALE_MS) {

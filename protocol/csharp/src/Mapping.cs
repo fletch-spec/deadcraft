@@ -127,6 +127,64 @@ public sealed unsafe class Mapping : IDisposable
 		return Volatile.Read(ref entrySerial) == serial ? AbilityEvent.Read(copy) : null;
 	}
 
+	/// <summary>Publishes the Minecraft side's state and cube set under the McState seqlock
+	/// (the Fabric client's job; here for tests and tools). Fills in <see cref="McState.Seq"/> and
+	/// <see cref="McState.CubeCount"/>.</summary>
+	public void WriteMcState(McState state, IReadOnlyList<Cube> cubes)
+	{
+		int count = Math.Min(cubes.Count, Proto.CubesCapacity);
+		ref uint seq = ref *(uint*)(_base + McState.Offset + McState.SeqAt);
+		uint start = Volatile.Read(ref seq) | 1;
+		Volatile.Write(ref seq, start);
+		for (int i = 0; i < count; i++)
+			cubes[i].Write(Region(Proto.CubesOffset + i * Cube.Size, Cube.Size));
+		state.Seq = start;
+		state.CubeCount = (uint)count;
+		state.Write(Region(McState.Offset, McState.Size));
+		Volatile.Write(ref seq, start + 1);
+	}
+
+	/// <summary>
+	/// Reads the Minecraft side's state. The cube list is copied only when its generation differs
+	/// from <paramref name="knownGeneration"/>; otherwise <paramref name="cubes"/> is left alone.
+	/// False if the writer stayed mid-update for the whole retry budget.
+	/// </summary>
+	public bool TryReadMcState(uint knownGeneration, out McState state, List<Cube> cubes)
+	{
+		ref uint seq = ref *(uint*)(_base + McState.Offset + McState.SeqAt);
+		var spin = new SpinWait();
+		byte[]? buffer = null;
+		for (int attempt = 0; attempt < 10_000; attempt++)
+		{
+			if (attempt > 0) spin.SpinOnce(sleep1Threshold: -1);
+			uint before = Volatile.Read(ref seq);
+			if ((before & 1) != 0) continue;
+			var candidate = McState.Read(Region(McState.Offset, McState.Size));
+			int count = (int)Math.Min(candidate.CubeCount, (uint)Proto.CubesCapacity);
+			bool copyCubes = candidate.Generation != knownGeneration;
+			if (copyCubes)
+			{
+				buffer ??= new byte[Proto.CubesCapacity * Cube.Size];
+				Region(Proto.CubesOffset, count * Cube.Size).CopyTo(buffer);
+			}
+			Interlocked.MemoryBarrier();
+			if (Volatile.Read(ref seq) != before) continue;
+			state = candidate;
+			if (copyCubes)
+			{
+				cubes.Clear();
+				for (int i = 0; i < count; i++) cubes.Add(Cube.Read(buffer.AsSpan(i * Cube.Size, Cube.Size)));
+			}
+			return true;
+		}
+		state = default;
+		return false;
+	}
+
+	/// <summary>Milliseconds since the Minecraft side last wrote its heartbeat.</summary>
+	public long MinecraftHeartbeatAgeMs() =>
+		Environment.TickCount64 - Volatile.Read(ref *(long*)(_base + Header.Offset + Header.MinecraftHeartbeatMsAt));
+
 	public void Dispose()
 	{
 		_view.SafeMemoryMappedViewHandle.ReleasePointer();

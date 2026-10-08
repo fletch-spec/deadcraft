@@ -15,6 +15,8 @@ import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -177,6 +179,58 @@ public final class Mapping implements AutoCloseable {
 		VarHandle.acquireFence();
 		if (view.get(INT, at + AbilityEvent.SERIAL_AT) != serial) return Optional.empty();
 		return Optional.of(AbilityEvent.read(b, 0));
+	}
+
+	/** Marks the Minecraft side alive: its process id and GetTickCount64. */
+	public void minecraftHeartbeat() {
+		view.set(INT, Header.OFFSET + Header.MINECRAFT_PID_AT, currentProcessId());
+		VarHandle.releaseFence();
+		view.set(LONG, Header.OFFSET + Header.MINECRAFT_HEARTBEAT_MS_AT, tickCount64());
+	}
+
+	/**
+	 * Publishes the Minecraft side's state and cube set under the McState seqlock. Fills in
+	 * {@code seq} and {@code cubeCount}; cubes beyond the capacity are dropped.
+	 */
+	public void writeMcState(McState state, List<Cube> cubes) {
+		int count = Math.min(cubes.size(), Proto.CUBES_CAPACITY);
+		long seqAt = McState.OFFSET + McState.SEQ_AT;
+		int start = view.get(INT, seqAt) | 1;
+		view.set(INT, seqAt, start);
+		VarHandle.releaseFence();
+		ByteBuffer b = ByteBuffer.allocate(count * Cube.SIZE).order(ByteOrder.LITTLE_ENDIAN);
+		for (int i = 0; i < count; i++) cubes.get(i).write(b, i * Cube.SIZE);
+		MemorySegment.copy(MemorySegment.ofArray(b.array()), 0, view, Proto.CUBES_OFFSET, count * Cube.SIZE);
+		state.seq = start;
+		state.cubeCount = count;
+		ByteBuffer h = ByteBuffer.allocate(McState.SIZE).order(ByteOrder.LITTLE_ENDIAN);
+		state.write(h, 0);
+		MemorySegment.copy(MemorySegment.ofArray(h.array()), 4, view, McState.OFFSET + 4, McState.SIZE - 4);
+		VarHandle.releaseFence();
+		view.set(INT, seqAt, start + 1);
+	}
+
+	/** McState and its cubes, read together under the seqlock. */
+	public record McSnapshot(McState state, List<Cube> cubes) {}
+
+	/** Reads McState and its cubes under the seqlock (the plugin's job; here for tests and tools). */
+	public Optional<McSnapshot> readMcState() {
+		long seqAt = McState.OFFSET + McState.SEQ_AT;
+		for (int attempt = 0; attempt < SEQLOCK_ATTEMPTS; attempt++) {
+			if (attempt > 0) Thread.onSpinWait();
+			int before = view.get(INT, seqAt);
+			VarHandle.acquireFence();
+			if ((before & 1) != 0) continue;
+			McState state = McState.read(copy(McState.OFFSET, McState.SIZE), 0);
+			int count = Math.min(state.cubeCount, Proto.CUBES_CAPACITY);
+			ByteBuffer b = copy(Proto.CUBES_OFFSET, count * Cube.SIZE);
+			VarHandle.acquireFence();
+			if (view.get(INT, seqAt) != before) continue;
+			List<Cube> cubes = new ArrayList<>(count);
+			for (int i = 0; i < count; i++) cubes.add(Cube.read(b, i * Cube.SIZE));
+			return Optional.of(new McSnapshot(state, cubes));
+		}
+		return Optional.empty();
 	}
 
 	/** Milliseconds since the Deadlock side last wrote, by GetTickCount64 (the clock both sides use). */
