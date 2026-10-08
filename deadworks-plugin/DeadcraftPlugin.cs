@@ -162,6 +162,32 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		return _hero;
 	}
 
+	// Deadlock sends a client only entities its map's visibility data says it can see, and the void
+	// map's data covers little more than a thin layer over its floor: colliders higher up stayed on
+	// the server only, so the client mispredicted falls on them (falling animation, missing walls).
+	// CheckTransmitEvent only offers Hide, but it wraps the engine's per-player transmit bitset, so
+	// set our colliders' bits in it directly.
+	private static readonly System.Reflection.FieldInfo? TransmitBitsField =
+		typeof(CheckTransmitEvent).GetField("_transmitBits", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+	private bool _warnedTransmit;
+
+	public override unsafe void OnCheckTransmit(CheckTransmitEvent args)
+	{
+		if (_colliders.Active == 0) return;
+		if (TransmitBitsField?.GetValue(args) is not { } boxed)
+		{
+			if (!_warnedTransmit) Log("can't reach the transmit bitset; colliders may not show on clients");
+			_warnedTransmit = true;
+			return;
+		}
+		var bits = (ulong*)System.Reflection.Pointer.Unbox(boxed);
+		foreach (var entity in _colliders.ActiveEntities)
+		{
+			int index = entity.EntityIndex;
+			if (index >= 0) bits[index >> 6] |= 1UL << (index & 63);
+		}
+	}
+
 	[GameEventHandler("player_used_ability")]
 	public HookResult OnPlayerUsedAbility(PlayerUsedAbilityEvent args)
 	{

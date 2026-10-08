@@ -107,6 +107,9 @@ internal sealed class ColliderPool
 	private static bool Close(Double3 a, Double3 b) =>
 		Math.Abs(a.X - b.X) < 1e-3 && Math.Abs(a.Y - b.Y) < 1e-3 && Math.Abs(a.Z - b.Z) < 1e-3;
 
+	/// <summary>The colliders currently standing in for blocks.</summary>
+	public IEnumerable<CBaseEntity> ActiveEntities => _active.Values;
+
 	/// <summary>Removes every collider (plugin unload).</summary>
 	public void Clear()
 	{

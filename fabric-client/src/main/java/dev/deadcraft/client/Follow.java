@@ -47,7 +47,7 @@ public final class Follow {
 	private static Vec3 lastDisplacement;
 	private static final BlockExport export = new BlockExport();
 	private static final HeroTimeline timeline = new HeroTimeline();
-	private static boolean savedBobView, savedVsync;
+	private static boolean savedBobView;
 	private static long lastGoodRead;
 
 	private Follow() {}
@@ -258,10 +258,6 @@ public final class Follow {
 			// twitches the hand and camera; Deadlock's camera doesn't bob like that anyway.
 			savedBobView = mc.options.bobView().get();
 			mc.options.bobView().set(false);
-			// Frames out of step with the monitor (e.g. 120 fps on 75 Hz) show unevenly and tear, which
-			// hides smooth motion. Sync to the display while linked.
-			savedVsync = mc.options.enableVsync().get();
-			mc.options.enableVsync().set(true);
 			timeline.clear();
 			var monitor = mc.getWindow().findBestMonitor();
 			LOG.info("Deadcraft: monitor {} Hz, frame limit {}, vsync {}", monitor == null ? "?" : monitor.currentMode().getRefreshRate(),
@@ -271,7 +267,6 @@ public final class Follow {
 		} else {
 			mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
 			mc.options.bobView().set(savedBobView);
-			mc.options.enableVsync().set(savedVsync);
 			status(mc, "Deadcraft: unlinked, vanilla movement" + (lastProblem.isEmpty() ? "" : " (" + lastProblem + ")"));
 		}
 		LOG.info("Deadcraft: {}", link ? "linked" : "unlinked " + lastProblem);
