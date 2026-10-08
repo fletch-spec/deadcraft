@@ -140,16 +140,6 @@ public final class Follow {
 		// Grounded only if Minecraft's own blocks agree: something solid just under the player's box.
 		boolean grounded = (hero.flags & HeroFlags.ON_GROUND) != 0
 			&& !mc.level.noCollision(player, player.getBoundingBox().move(0, -0.06, 0));
-		if (grounded) {
-			// The server resends the blocks under a player who reports "on ground" while its own
-			// collision didn't stop any downward movement (ServerGamePacketListenerImpl,
-			// verticalCollisionBelow), and that resend flashes the chunk. Vanilla clients always sink a
-			// little from gravity; Deadlock holds the hero exactly level. Sink 1 mm so the server's
-			// move meets the floor.
-			y -= 0.001;
-			player.setPos(x, y, z);
-			player.yo = player.yOld = y;
-		}
 		player.setOnGround(grounded);
 		player.resetFallDistance();
 
