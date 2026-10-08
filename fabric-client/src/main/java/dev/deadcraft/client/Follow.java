@@ -221,7 +221,7 @@ public final class Follow {
 		}
 		long age = mapping.deadlockHeartbeatAgeMs();
 		if (age > STALE_MS) {
-			problem("Deadlock bridge stale (" + age + " ms)");
+			problem("Deadlock bridge stale (no heartbeat for over " + STALE_MS + " ms)");
 			return Optional.empty();
 		}
 		Optional<HeroState> state = mapping.readHeroState();

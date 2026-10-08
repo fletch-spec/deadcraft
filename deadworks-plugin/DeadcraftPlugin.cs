@@ -162,18 +162,24 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		return _hero;
 	}
 
-	// Deadlock sends a client only entities its map's visibility data says it can see, and the void
-	// map's data covers little more than a thin layer over its floor: colliders higher up stayed on
-	// the server only, so the client mispredicted falls on them (falling animation, missing walls).
-	// CheckTransmitEvent only offers Hide, but it wraps the engine's per-player transmit bitset, so
-	// set our colliders' bits in it directly.
+	// What the Deadlock client is sent. It needs the colliders near its hero to predict movement
+	// (without them it predicts falls and walks through walls), and nothing else: the server
+	// collides with all of them anyway. Sending every collider crashed the server at about 1700, and
+	// the void map's own visibility data only covers a thin layer over its floor, so set the
+	// transmit bits ourselves: on within TransmitRadius of the hero, off for every other collider.
+	// CheckTransmitEvent only offers Hide; it wraps the engine's per-player bitset, so we set bits
+	// in it directly.
+	private const float TransmitRadius = 8 * Proto.UnitsPerBlock;
 	private static readonly System.Reflection.FieldInfo? TransmitBitsField =
 		typeof(CheckTransmitEvent).GetField("_transmitBits", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
 	private bool _warnedTransmit;
 
 	public override unsafe void OnCheckTransmit(CheckTransmitEvent args)
 	{
-		if (_colliders.Active == 0) return;
+		if (_colliders.Total == 0) return;
+		foreach (var entity in _colliders.AllEntities)
+			if (entity.IsValid) args.Hide(entity);
+		if (_hero == null || !_hero.IsValid) return;
 		if (TransmitBitsField?.GetValue(args) is not { } boxed)
 		{
 			if (!_warnedTransmit) Log("can't reach the transmit bitset; colliders may not show on clients");
@@ -181,7 +187,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			return;
 		}
 		var bits = (ulong*)System.Reflection.Pointer.Unbox(boxed);
-		foreach (var entity in _colliders.ActiveEntities)
+		foreach (var entity in _colliders.Near(_hero.Position, TransmitRadius))
 		{
 			int index = entity.EntityIndex;
 			if (index >= 0) bits[index >> 6] |= 1UL << (index & 63);
