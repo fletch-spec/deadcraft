@@ -59,6 +59,13 @@ public final class Follow {
 
 	/** Every client tick: heartbeat and block export to Deadlock. */
 	public static void clientTick(Minecraft mc) {
+		if (linked && mc.player != null && lastState != null) {
+			// Follow places the player every frame (xo == x), so Minecraft's own walk animation sees no
+			// movement. Drive it from the hero's horizontal speed, as LivingEntity does from movement.
+			Vec3 v = Proto.toMinecraft(lastState.velocity);
+			double blocksPerTick = Math.sqrt(v.x() * v.x() + v.z() * v.z()) / 20.0;
+			mc.player.walkAnimation.update((float) Math.min(blocksPerTick * 4.0, 1.0), 0.4f, 1.0f);
+		}
 		if (mapping == null) return;
 		Double3 offset = new Double3(heroAnchor.x() - anchorX, heroAnchor.y() - anchorY, heroAnchor.z() - anchorZ);
 		long t0 = System.nanoTime();
@@ -124,6 +131,7 @@ public final class Follow {
 		}
 		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
 
+		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z());
 		Vec3 v = Proto.toMinecraft(hero.velocity);
 		timeline.add(new HeroTimeline.Sample(hero.tick, hero.serverTime, heroBlocks.x(), heroBlocks.y(), heroBlocks.z(),
 			hero.cameraAngles.y(), hero.cameraAngles.x(), v.x(), v.y(), v.z()), localNow);
@@ -264,11 +272,13 @@ public final class Follow {
 			var monitor = mc.getWindow().findBestMonitor();
 			LOG.info("Deadcraft: monitor {} Hz, frame limit {}, vsync {}", monitor == null ? "?" : monitor.currentMode().getRefreshRate(),
 				mc.options.framerateLimit().get(), mc.options.enableVsync().get());
+			DeadlockCamera.onLink(mc, true);
 			lastProblem = "";
 			status(mc, "Deadcraft: following the Deadlock hero");
 		} else {
 			mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
 			mc.options.bobView().set(savedBobView);
+			DeadlockCamera.onLink(mc, false);
 			status(mc, "Deadcraft: unlinked, vanilla movement" + (lastProblem.isEmpty() ? "" : " (" + lastProblem + ")"));
 		}
 		LOG.info("Deadcraft: {}", link ? "linked" : "unlinked " + lastProblem);
@@ -288,6 +298,14 @@ public final class Follow {
 	static String anchor() {
 		anchorRequested = true;
 		return linked ? "Re-anchored: the hero's position now maps to where you stand." : "Not linked; will anchor on link.";
+	}
+
+	static String camera(float distance, float right, float up) {
+		return DeadlockCamera.set(distance, right, up);
+	}
+
+	static String camera(Boolean on) {
+		return on == null ? DeadlockCamera.describe() : DeadlockCamera.setEnabled(Minecraft.getInstance(), on, linked);
 	}
 
 	static String setOverlay(boolean on) {

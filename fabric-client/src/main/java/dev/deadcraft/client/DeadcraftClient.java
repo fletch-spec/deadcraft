@@ -1,6 +1,7 @@
 package dev.deadcraft.client;
 
 import com.mojang.brigadier.Command;
+import com.mojang.brigadier.arguments.FloatArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -16,6 +17,15 @@ public final class DeadcraftClient implements ClientModInitializer {
 				.then(ClientCommands.literal("anchor").executes(c -> reply(c.getSource(), Follow.anchor())))
 				.then(ClientCommands.literal("on").executes(c -> reply(c.getSource(), Follow.setEnabled(true))))
 				.then(ClientCommands.literal("off").executes(c -> reply(c.getSource(), Follow.setEnabled(false))))
+				.then(ClientCommands.literal("camera")
+					.then(ClientCommands.literal("on").executes(c -> reply(c.getSource(), Follow.camera(true))))
+					.then(ClientCommands.literal("off").executes(c -> reply(c.getSource(), Follow.camera(false))))
+					.then(ClientCommands.argument("distance", FloatArgumentType.floatArg(0, 1000))
+						.then(ClientCommands.argument("right", FloatArgumentType.floatArg(-500, 500))
+							.then(ClientCommands.argument("up", FloatArgumentType.floatArg(-500, 500))
+								.executes(c -> reply(c.getSource(), Follow.camera(FloatArgumentType.getFloat(c, "distance"),
+									FloatArgumentType.getFloat(c, "right"), FloatArgumentType.getFloat(c, "up")))))))
+					.executes(c -> reply(c.getSource(), Follow.camera(null))))
 				.then(ClientCommands.literal("overlay")
 					.then(ClientCommands.literal("on").executes(c -> reply(c.getSource(), Follow.setOverlay(true))))
 					.then(ClientCommands.literal("off").executes(c -> reply(c.getSource(), Follow.setOverlay(false)))))
