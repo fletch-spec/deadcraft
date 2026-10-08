@@ -48,3 +48,29 @@ If a command says `no hero pawn`, you haven't spawned yet.
 - Rows 2 to 4 pick the collider recipe (model collision or bounding box, and which model).
 - Row 5 decides whether moving colliders can carry the hero, which matters for pistons and falling blocks later.
 - Rows 7 and 8 set the pool size budget.
+
+## Results (2026-10-08, Deadworks v0.5.6, Deadlock build 10931, dl_midtown, Celeste)
+
+**Verdict: runtime colliders work. M4 goes ahead with a pool of `prop_dynamic` crates using model collision.**
+
+| Test | Result |
+|---|---|
+| `dc_info` | Tick 0.015625 s (**64 Hz**). Hero hull 40 × 40 × 112 units (`BBox`), eye 86 units above the feet. Stamina, health, position, grounded and velocity read correctly |
+| View angles | `ViewAngles` returns garbage (0, 0, -3.4e26). `EyeAngles` (-35.7, 34.7) and `CameraAngles` (-35.2, 35.6) agree. **Use `CameraAngles`** |
+| `vphys crate` (`wood_crate_64`, 64 × 64 × 66.5) | Blocks, can be stood on, a dash from close range never goes through |
+| `bbox crate` | Blocks and can be stood on, but **a dash from point-blank range phases through, repeatably**. Not usable |
+| Resize `Collision.Mins/Maxs` after spawn | **Crashes the server** (access violation in coreclr). Never do it |
+| `vphys crate` with `ModelScale` 2 | Visibly and physically 2 × 2 × 2 blocks; close dashes still blocked. `Collision.Mins/Maxs` still report the unscaled size, so track sizes in the plugin |
+| Moving crate (`dc_move`, ±32 units, teleport every tick) | Carries the hero smoothly, no falling through |
+| Pool, 256 moving every tick | 0.45 ms/tick of the 15.6 ms budget, no hitching |
+| Pool, 512 moving every tick | 1.0 ms/tick |
+| Pool, 1024 static | Smooth |
+| Pool, 1024 moving every tick | Slight client frame lag, then the client dropped with `CNetChan::ProcessMessages: Disconnecting netchan because of excessive CPU usage`. The limit is entity updates sent to the client, not server physics |
+
+**M4 design rules from this:**
+1. `prop_dynamic` + `wood_crate_64` + `solid` = VPhysics. 64 units = 1 block, so one crate is one block.
+2. Spawn the pool once. Move a collider only when the set of solid blocks near the player changes; never teleport unchanged colliders every tick.
+3. Merge solid regions into cubic chunks with `ModelScale` 2, 4, ... (`ModelScale` is uniform, so only cubes) to cut the count.
+4. Budget: around 1000 colliders alive, and a few dozen moved per tick at most.
+
+**Still unverified:** the 256 pool spawned by the lane (the log confirms it) but wasn't visible, most likely because the grid always grows toward +x/+y from the spawn point. Doesn't affect the results above.

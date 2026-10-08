@@ -9,6 +9,8 @@ Research spike, 2026-10-08. No code written. Sources were read at these versions
 | SkyCraft (`chasmlol/SkyCraft`, `main`) | `docs/DESIGN.md`, `protocol/skycraft_protocol.h` (2026-10-08) |
 | Fabric meta + Modrinth | 2026-10-08 |
 
+**Update 2026-10-08:** (b) is now verified in game; see [collider-test.md](collider-test.md#results-2026-10-08-deadworks-v056-deadlock-build-10931-dl_midtown-celeste). Scale decided: 64 units = 1 block (hero at Minecraft-player height), replacing the 1 block = 1 m rule.
+
 **Verdict: feasible, go to M1.** Every question has a positive answer in the SDK source. The biggest risk is (b): the API to build runtime colliders exists, but nobody has shown a pawn standing on one, so the first in-game test is a 1-block collider. If runtime colliders fail, M1's static pipeline is the fallback, so (b) is not a stop.
 
 ---

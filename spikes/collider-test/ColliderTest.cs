@@ -43,18 +43,21 @@ public class ColliderTest : DeadworksPluginBase
 		Say(caller, $"map={Server.MapName} hero={pawn.HeroID} tick={tick:F5}s ({(tick > 0 ? 1f / tick : 0):F1} Hz)");
 		Say(caller, $"pos={Fmt(pawn.Position)} eyeOffset={Fmt(eye)} vel={Fmt(pawn.AbsVelocity)} ground={pawn.IsOnGround}");
 		Say(caller, $"hull mins={Fmt(col?.Mins)} maxs={Fmt(col?.Maxs)} solid={col?.SolidType}");
-		Say(caller, $"view={Fmt(pawn.ViewAngles)} stamina={pawn.GetStamina():F2} hp={pawn.Health}/{pawn.GetMaxHealth()}");
+		Say(caller, $"view={Fmt(pawn.ViewAngles)} eyeAng={Fmt(pawn.EyeAngles)} camAng={Fmt(pawn.CameraAngles)}");
+		Say(caller, $"stamina={pawn.GetStamina():F2} hp={pawn.Health}/{pawn.GetMaxHealth()}");
 	}
 
 	// mode: "vphys" uses the model's own collision mesh; "bbox" switches to an axis-aligned box
 	// from the model's bounds (SetSolid only applies when SetModel rebuilds the body).
-	[Command("dc_box", Description = "dc_box [vphys|bbox] [crate|cube]: spawn a box 200 units ahead")]
-	public void CmdBox(CCitadelPlayerController caller, string mode = "vphys", string model = "crate")
+	// Resizing Collision.Mins/Maxs after spawn crashes the server (coreclr access violation, v0.5.6),
+	// so merged colliders are tried through the ModelScale keyvalue instead: scale 2 = a 2x2x2 block box.
+	[Command("dc_box", Description = "dc_box [vphys|bbox] [crate|cube] [scale]: spawn a box 200 units ahead")]
+	public void CmdBox(CCitadelPlayerController caller, string mode = "vphys", string model = "crate", float scale = 1f)
 	{
 		if (caller.GetHeroPawn() is not { } pawn) { Say(caller, "no hero pawn"); return; }
 		string path = model == "cube" ? CubeModel : CrateModel;
-		var pos = pawn.Position + Forward(pawn.ViewAngles) * 200f;
-		var box = SpawnBox(path, pos, mode == "vphys");
+		var pos = pawn.Position + Forward(pawn.CameraAngles) * 200f;
+		var box = SpawnBox(path, pos, mode == "vphys", scale);
 		if (box == null) { Say(caller, "spawn failed"); return; }
 		if (mode == "bbox")
 		{
@@ -63,7 +66,7 @@ public class ColliderTest : DeadworksPluginBase
 			box.SetModel(path);
 		}
 		var col = box.Collision;
-		Say(caller, $"box #{_boxes.Count} {mode} {model} at {Fmt(pos)} mins={Fmt(col?.Mins)} maxs={Fmt(col?.Maxs)} " +
+		Say(caller, $"box #{_boxes.Count} {mode} {model} x{scale} at {Fmt(pos)} mins={Fmt(col?.Mins)} maxs={Fmt(col?.Maxs)} " +
 			$"solid={col?.SolidType} as={col?.InteractsAs} with={col?.InteractsWith} group={col?.CollisionGroup}");
 	}
 
@@ -77,20 +80,22 @@ public class ColliderTest : DeadworksPluginBase
 		Say(caller, "move on: stand on the box and see if it carries you");
 	}
 
-	[Command("dc_pool", Description = "dc_pool <n>: spawn n boxes in a grid and teleport all of them every tick")]
-	public void CmdPool(CCitadelPlayerController caller, int n = 256)
+	// move=false spawns the grid but never teleports it: separates "how many colliders" from
+	// "how many collider updates per tick" (1024 moving boxes flooded the client's netchan).
+	[Command("dc_pool", Description = "dc_pool <n> [move]: spawn n boxes in a grid; move=true teleports all of them every tick")]
+	public void CmdPool(CCitadelPlayerController caller, int n = 256, bool move = true)
 	{
 		if (caller.GetHeroPawn() is not { } pawn) { Say(caller, "no hero pawn"); return; }
 		int side = (int)MathF.Ceiling(MathF.Sqrt(n));
-		var origin = pawn.Position + Forward(pawn.ViewAngles) * 300f;
+		var origin = pawn.Position + Forward(pawn.CameraAngles) * 300f;
 		for (int i = 0; i < n; i++)
 		{
 			var pos = origin + new Vector3(i % side * 80f, i / side * 80f, 0f);
 			if (SpawnBox(CrateModel, pos, true) != null) _poolHome.Add(pos);
 		}
-		_pooling = true;
+		_pooling = move;
 		_poolMs = 0; _poolTicks = 0; _lastReport = GlobalVars.CurTime;
-		Say(caller, $"pool of {_poolHome.Count} running; cost is logged every 5 s");
+		Say(caller, move ? $"pool of {_poolHome.Count} moving; cost is logged every 5 s" : $"pool of {_poolHome.Count} spawned, static");
 	}
 
 	// For the feel test: a custom map may not spawn the hero where the course is.
@@ -143,7 +148,7 @@ public class ColliderTest : DeadworksPluginBase
 		}
 	}
 
-	private CBaseEntity? SpawnBox(string model, Vector3 pos, bool vphysics)
+	private CBaseEntity? SpawnBox(string model, Vector3 pos, bool vphysics, float scale = 1f)
 	{
 		var box = CBaseEntity.CreateByDesignerName("prop_dynamic");
 		if (box == null) return null;
@@ -151,6 +156,7 @@ public class ColliderTest : DeadworksPluginBase
 		ekv.SetString("model", model);
 		ekv.SetVector("origin", pos);
 		if (vphysics) ekv.SetInt("solid", (int)SolidType.VPhysics);
+		if (scale != 1f) ekv.SetFloat("ModelScale", scale);
 		box.Spawn(ekv);
 		_boxes.Add(box);
 		return box;
@@ -180,5 +186,13 @@ public class ColliderTest : DeadworksPluginBase
 		Log(text);
 	}
 
-	private static void Log(string text) => Console.WriteLine($"[dc] {text}");
+	// Also appended to %TEMP%\deadcraft-collider-test.log so results can be read without the console window.
+	private static readonly string LogPath = Path.Combine(Path.GetTempPath(), "deadcraft-collider-test.log");
+
+	private static void Log(string text)
+	{
+		string line = $"[dc] {text}";
+		Console.WriteLine(line);
+		try { File.AppendAllText(LogPath, $"{DateTime.Now:HH:mm:ss} {line}{Environment.NewLine}"); } catch (IOException) { }
+	}
 }

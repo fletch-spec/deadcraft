@@ -10,7 +10,7 @@ Minecraft structure block ──► .nbt ──► MC2CS ──► .vmap ──�
 
 You run every step; nothing here is automated. Steps marked **(unverified)** come from community docs and haven't been run end to end. If one fails, paste the error and I'll adjust this doc.
 
-**Scale:** 1 block = 1 metre. Until the collider test measures it, assume Source's 1 unit = 1 inch, so **39.37 units per block**. Use **40** in MC2CS for now: it's 1.6 % off and keeps Hammer's grid sane. `/protocol` will hold the exact factor.
+**Scale: 64 Source units = 1 block** (decided 2026-10-08 from the collider test). The hero's hull is 112 units tall, so this makes them 1.75 blocks tall and 0.625 wide, close to a Minecraft player (1.8 × 0.6). It matches Hammer's grid, MC2CS's default and the 64-unit crate collider. `/protocol` holds the factor.
 
 ## 0. One-time setup
 
@@ -48,7 +48,7 @@ Never edit Deadlock's own files in the Steam folder. The only thing we add there
 | Input | `feel1.nbt` | |
 | Texture pack | leave empty | Placeholder material `materials/dev/reflectivity_30.vmat` exists in Deadlock, so no textures to compile or ship |
 | MC assets | leave empty | Model blocks become cubes; fine for feel |
-| Block Scale | **40** | See scale above |
+| Block Scale | **64** (the default) | See scale above |
 | Cull Hidden Faces | on | |
 | Output Mode | Per Chunk | |
 | Stair clip ramps | on | Stairs walk like ramps |
@@ -72,13 +72,13 @@ Never edit Deadlock's own files in the Steam folder. The only thing we add there
 1. Copy `feel1.vpk` to `C:\Program Files (x86)\Steam\steamapps\common\Deadlock\game\citadel\maps\`. Custom maps sit next to stock ones so `map <name>` finds them (Deadworks' Docker notes say the same). Steam's **Verify integrity** may delete it; just copy it back.
 2. From `C:\dev\deadcraft`: `.\tools\run-server.ps1 -Map feel1`
 3. Start Deadlock, open the console, `connect localhost:27067`, pick Celeste.
-4. If you spawn off the course, open chat and use `/dc_tp <x> <y> <z>`. The course spans x and y from 0 to block-count × 40 and starts at z 0, unless you set an origin offset.
+4. If you spawn off the course, open chat and use `/dc_tp <x> <y> <z>`. The course spans x and y from 0 to block-count × 64 and starts at z 0, unless you set an origin offset.
 
 ## 5. What to try and report
 
 Spend 10 to 15 minutes. Paste back short notes:
 
-- **Scale:** does a 1-block step feel like a curb, and a 2-block wall like a wall? Does Celeste look about 1.8 blocks tall? Run `/dc_info` and paste it.
+- **Scale:** does a 1-block step feel like a curb, and a 2-block wall like a wall? Does a 2-high, 1-wide doorway fit Celeste?
 - **Movement:** sprint, slide, dash, double jump, mantle (wall climb), stamina use. Anything that feels wrong on blocky geometry?
 - **Stairs and slabs:** smooth with clip ramps on?
 - **Gaps:** how many blocks can you clear with dash and jump?
@@ -90,4 +90,3 @@ Spend 10 to 15 minutes. Paste back short notes:
 2. That a custom map without Deadlock's game-mode entities lets a hero spawn and move. Fallback: `/dc_tp`.
 3. That a `.vpk` in `game\citadel\maps` loads with `+map` on the Windows build, as it does in Deadworks' Docker image.
 4. Structure block size limit in 26.3.
-5. 40 units per block. The collider test's `/dc_info` gives the hero's real height.
