@@ -293,30 +293,34 @@ public final class HeroModel {
 	 * position: children inherit it, so the shares add up along a chain such as spine to head.
 	 */
 	public void skin(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares, float[] out) {
-		float[] t = pose.trs;
-		for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
-			int i = n * TRS, o = n * 12;
-			float x = t[i + 3], y = t[i + 4], z = t[i + 5], w = t[i + 6];
-			float sx = t[i + 7], sy = t[i + 8], sz = t[i + 9];
-			// Local = translation * rotation * scale, as 3x4 rows.
-			float r00 = 1 - 2 * (y * y + z * z), r01 = 2 * (x * y - z * w), r02 = 2 * (x * z + y * w);
-			float r10 = 2 * (x * y + z * w), r11 = 1 - 2 * (x * x + z * z), r12 = 2 * (y * z - x * w);
-			float r20 = 2 * (x * z - y * w), r21 = 2 * (y * z + x * w), r22 = 1 - 2 * (x * x + y * y);
-			float l00 = r00 * sx, l01 = r01 * sy, l02 = r02 * sz, l03 = t[i];
-			float l10 = r10 * sx, l11 = r11 * sy, l12 = r12 * sz, l13 = t[i + 1];
-			float l20 = r20 * sx, l21 = r21 * sy, l22 = r22 * sz, l23 = t[i + 2];
-			int p = parents[n];
-			if (p < 0) {
-				world[o] = l00; world[o + 1] = l01; world[o + 2] = l02; world[o + 3] = l03;
-				world[o + 4] = l10; world[o + 5] = l11; world[o + 6] = l12; world[o + 7] = l13;
-				world[o + 8] = l20; world[o + 9] = l21; world[o + 10] = l22; world[o + 11] = l23;
-			} else {
-				mul(world, p * 12, l00, l01, l02, l03, l10, l11, l12, l13, l20, l21, l22, l23, world, o);
-			}
-			if (twist != 0) {
-				for (int k = 0; k < twistNodes.length; k++) {
-					if (twistNodes[k] == n) turnAboutUp(world, o, twist * twistShares[k]);
-				}
+		skin(pose, world, twist, twistNodes, twistShares, -1, -1, out);
+	}
+
+	/**
+	 * As above, and {@code follower} (with everything below it) keeps the placement relative to
+	 * {@code leader} that it has without the twist: Celeste's weapon hangs off the skeleton's root, not
+	 * her hand (Deadlock pins it there), so otherwise the twist turns the hand away from it.
+	 */
+	public void skin(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares, int follower, int leader, float[] out) {
+		build(pose, world, twist, twistNodes, twistShares);
+		if (twist != 0 && follower >= 0 && leader >= 0) {
+			if (untwisted == null || untwisted.length != world.length) untwisted = new float[world.length];
+			build(pose, untwisted, 0, twistNodes, twistShares);
+			float[] offset = new float[12], placed = new float[12];
+			inverse(untwisted, leader * 12, offset);
+			int fo = follower * 12;
+			float[] u = untwisted;
+			mul(offset, 0, u[fo], u[fo + 1], u[fo + 2], u[fo + 3], u[fo + 4], u[fo + 5], u[fo + 6], u[fo + 7], u[fo + 8], u[fo + 9],
+				u[fo + 10], u[fo + 11], placed, 0);
+			mul(world, leader * 12, placed[0], placed[1], placed[2], placed[3], placed[4], placed[5], placed[6], placed[7], placed[8],
+				placed[9], placed[10], placed[11], world, fo);
+			// Everything below the follower again, from its new place (parents come first).
+			boolean[] below = new boolean[nodeCount()];
+			below[follower] = true;
+			for (int n = follower + 1; n < below.length; n++) {
+				if (parents[n] < 0 || !below[parents[n]]) continue;
+				below[n] = true;
+				local(pose.trs, n, world, n * 12, world, parents[n] * 12);
 			}
 		}
 		for (int s = 0, joints = skinnedJointCount(); s < joints; s++) {
@@ -325,6 +329,59 @@ public final class HeroModel {
 			mul(world, skinNodes[s] * 12, m[ib], m[ib + 1], m[ib + 2], m[ib + 3], m[ib + 4], m[ib + 5], m[ib + 6], m[ib + 7],
 				m[ib + 8], m[ib + 9], m[ib + 10], m[ib + 11], out, s * 12);
 		}
+	}
+
+	private float[] untwisted;
+
+	/** World matrices of every node from {@code pose}, with the upper-body twist. */
+	private void build(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares) {
+		for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
+			int o = n * 12;
+			local(pose.trs, n, world, o, parents[n] < 0 ? null : world, parents[n] * 12);
+			if (twist != 0) {
+				for (int k = 0; k < twistNodes.length; k++) {
+					if (twistNodes[k] == n) turnAboutUp(world, o, twist * twistShares[k]);
+				}
+			}
+		}
+	}
+
+	/** out[o..] = parent[po..] * node n's local transform (the local alone when parent is null). */
+	private static void local(float[] t, int n, float[] out, int o, float[] parent, int po) {
+		int i = n * TRS;
+		float x = t[i + 3], y = t[i + 4], z = t[i + 5], w = t[i + 6];
+		float sx = t[i + 7], sy = t[i + 8], sz = t[i + 9];
+		// Local = translation * rotation * scale, as 3x4 rows.
+		float r00 = 1 - 2 * (y * y + z * z), r01 = 2 * (x * y - z * w), r02 = 2 * (x * z + y * w);
+		float r10 = 2 * (x * y + z * w), r11 = 1 - 2 * (x * x + z * z), r12 = 2 * (y * z - x * w);
+		float r20 = 2 * (x * z - y * w), r21 = 2 * (y * z + x * w), r22 = 1 - 2 * (x * x + y * y);
+		float l00 = r00 * sx, l01 = r01 * sy, l02 = r02 * sz, l03 = t[i];
+		float l10 = r10 * sx, l11 = r11 * sy, l12 = r12 * sz, l13 = t[i + 1];
+		float l20 = r20 * sx, l21 = r21 * sy, l22 = r22 * sz, l23 = t[i + 2];
+		if (parent == null) {
+			out[o] = l00; out[o + 1] = l01; out[o + 2] = l02; out[o + 3] = l03;
+			out[o + 4] = l10; out[o + 5] = l11; out[o + 6] = l12; out[o + 7] = l13;
+			out[o + 8] = l20; out[o + 9] = l21; out[o + 10] = l22; out[o + 11] = l23;
+		} else {
+			mul(parent, po, l00, l01, l02, l03, l10, l11, l12, l13, l20, l21, l22, l23, out, o);
+		}
+	}
+
+	/** The inverse of the 3x4 affine at a[ao..], into out[0..12]. */
+	private static void inverse(float[] a, int ao, float[] out) {
+		float a00 = a[ao], a01 = a[ao + 1], a02 = a[ao + 2], a10 = a[ao + 4], a11 = a[ao + 5], a12 = a[ao + 6];
+		float a20 = a[ao + 8], a21 = a[ao + 9], a22 = a[ao + 10];
+		float c00 = a11 * a22 - a12 * a21, c01 = a02 * a21 - a01 * a22, c02 = a01 * a12 - a02 * a11;
+		float c10 = a12 * a20 - a10 * a22, c11 = a00 * a22 - a02 * a20, c12 = a02 * a10 - a00 * a12;
+		float c20 = a10 * a21 - a11 * a20, c21 = a01 * a20 - a00 * a21, c22 = a00 * a11 - a01 * a10;
+		float det = a00 * c00 + a01 * c10 + a02 * c20;
+		float inv = Math.abs(det) < 1e-12f ? 0 : 1 / det;
+		float b00 = c00 * inv, b01 = c01 * inv, b02 = c02 * inv, b10 = c10 * inv, b11 = c11 * inv, b12 = c12 * inv;
+		float b20 = c20 * inv, b21 = c21 * inv, b22 = c22 * inv;
+		float tx = a[ao + 3], ty = a[ao + 7], tz = a[ao + 11];
+		out[0] = b00; out[1] = b01; out[2] = b02; out[3] = -(b00 * tx + b01 * ty + b02 * tz);
+		out[4] = b10; out[5] = b11; out[6] = b12; out[7] = -(b10 * tx + b11 * ty + b12 * tz);
+		out[8] = b20; out[9] = b21; out[10] = b22; out[11] = -(b20 * tx + b21 * ty + b22 * tz);
 	}
 
 	/** out[o..] = a[ao..] * b, both 3x4 with an implied (0, 0, 0, 1) last row. */

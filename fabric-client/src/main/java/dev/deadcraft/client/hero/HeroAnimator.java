@@ -40,12 +40,9 @@ public final class HeroAnimator {
 	static final float LAND_AFTER_S = 0.45f, STOP_FROM_SPEED = 3f;
 	/** The upper body turns at most this far from the feet, degrees. */
 	static final float LOOK_LIMIT = 75f;
-	/**
-	 * Shares of the upper-body turn, lower spine to head (Celeste's joint names). The weapon hangs off
-	 * the skeleton's root, not the hand (Deadlock pins it to the hand), so it takes the whole turn.
-	 */
-	private static final String[] LOOK_NODES = {"spine_1", "spine_2", "spine_3", "neck_0", "head", "weaponPivot"};
-	private static final float[] LOOK_SHARES = {0.15f, 0.2f, 0.2f, 0.2f, 0.25f, 1f};
+	/** Shares of the upper-body turn, lower spine to head (Celeste's joint names). */
+	private static final String[] LOOK_NODES = {"spine_1", "spine_2", "spine_3", "neck_0", "head"};
+	private static final float[] LOOK_SHARES = {0.15f, 0.2f, 0.2f, 0.2f, 0.25f};
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
@@ -58,6 +55,8 @@ public final class HeroAnimator {
 	private final float[] world, skin;
 	private final int[] lookNodes;
 	private final float[] lookShares;
+	/** The weapon hangs off the skeleton's root (Deadlock pins it to the hand): it follows the right hand. */
+	private final int weapon, hand;
 	private State state = State.IDLE;
 	/** A move started by an ability event or the motion, held until it ends. */
 	private State move;
@@ -90,6 +89,8 @@ public final class HeroAnimator {
 			nodes[found] = n;
 			shares[found++] = LOOK_SHARES[i];
 		}
+		weapon = model.node("weaponPivot");
+		hand = model.node("hand_R");
 		lookNodes = java.util.Arrays.copyOf(nodes, found);
 		lookShares = java.util.Arrays.copyOf(shares, found);
 	}
@@ -193,7 +194,7 @@ public final class HeroAnimator {
 		shown.copyFrom(previous);
 		shown.blendTowards(pose, fade < 1 ? smooth(fade) : 1);
 		// Model space turns the other way round from Minecraft's yaw (the renderer turns by -yaw).
-		model.skin(shown, world, (float) -Math.toRadians(look), lookNodes, lookShares, skin);
+		model.skin(shown, world, (float) -Math.toRadians(look), lookNodes, lookShares, weapon, hand, skin);
 		return skin;
 	}
 

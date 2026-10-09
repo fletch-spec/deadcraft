@@ -197,6 +197,7 @@ internal static class HeroPack
 			float duration = tracks[track].Duration;
 			int frames = Math.Max(1, (int)Math.Round(duration * Fps) + (loop ? 0 : 1));
 			var locals = new float[frames * nodes.Count * 10];
+			var frameLocals = new Trs[frames][];
 			for (int f = 0; f < frames; f++)
 			{
 				armature.SetAnimationFrame(track, Math.Min(duration, f / Fps), loop);
@@ -211,9 +212,28 @@ internal static class HeroPack
 					for (int n = 0; n < nodes.Count; n++)
 						if (n != rootMotion && parents[n] == parents[rootMotion]) local[n].T -= travel;
 					local[rootMotion].T = rest[rootMotion].T;
+					// Clips also differ in root_motion's orientation (standing idle at rest, the others turned
+					// 120 degrees, each compensated in the pelvis), so blending idle with anything twisted the
+					// whole body mid-blend. Re-express every clip with root_motion at its rest orientation and
+					// its children carrying the difference: world positions don't change.
+					var clipRoot = Compose(local[rootMotion]);
+					if (Matrix4x4.Invert(Compose(rest[rootMotion]), out var restRootInverse))
+					{
+						var change = clipRoot * restRootInverse;  // row vectors: child-local * change = child under the rest root
+						for (int n = 0; n < nodes.Count; n++)
+							if (parents[n] == rootMotion) local[n] = Decompose(Compose(local[n]) * change);
+						local[rootMotion].R = rest[rootMotion].R;
+						local[rootMotion].S = rest[rootMotion].S;
+					}
 				}
-				for (int n = 0; n < nodes.Count; n++) Put(locals, (f * nodes.Count + n) * 10, local[n]);
-				if (clipName == "dash_ground" && f == 15) WriteReference(local);
+				frameLocals[f] = local;
+			}
+			int stillCloth = PinStillClothToHips(frameLocals);
+			if (stillCloth > 0) Console.WriteLine($"pack:   {clipName}: {stillCloth} cloth bones don't move in this clip; they follow the hips");
+			for (int f = 0; f < frames; f++)
+			{
+				for (int n = 0; n < nodes.Count; n++) Put(locals, (f * nodes.Count + n) * 10, frameLocals[f][n]);
+				if (clipName == "dash_ground" && f == 15) WriteReference(frameLocals[f]);
 			}
 			clipData.Add((clipName, loop, frames, locals));
 		}
@@ -280,6 +300,51 @@ internal static class HeroPack
 			w.Write(bytes);
 		}
 
+		// Deadlock simulates the cloth (Celeste's skirt) live, and some clips (landing, stopping, wall
+		// braces) carry no cloth motion: those bones keep their standing pose while the body crouches or
+		// leans, stretching the skirt into spikes. In such a clip, each bone beside root_motion that never
+		// moves instead keeps its rest placement relative to the pelvis. Returns how many were pinned.
+		int PinStillClothToHips(Trs[][] frameLocals)
+		{
+			int pelvis = nodes.FindIndex(l => model.LogicalNodes[l].Name == "pelvis");
+			if (rootMotion < 0 || pelvis < 0) return 0;
+			var still = new List<int>();
+			for (int n = 0; n < nodes.Count; n++)
+			{
+				if (n == rootMotion || parents[n] != parents[rootMotion]) continue;
+				bool moves = false;
+				for (int f = 1; f < frameLocals.Length && !moves; f++)
+					moves = Math.Abs(Quaternion.Dot(frameLocals[f][n].R, frameLocals[0][n].R)) < 0.99999f;
+				if (!moves) still.Add(n);  // frozen for the whole clip (not necessarily at its rest pose)
+			}
+			if (still.Count == 0) return 0;
+			var restWorld = Worlds(rest);
+			Matrix4x4.Invert(restWorld[pelvis], out var restPelvisInverse);
+			foreach (var local in frameLocals)
+			{
+				var world = Worlds(local);
+				foreach (int n in still)
+				{
+					var target = restWorld[n] * restPelvisInverse * world[pelvis];  // row vectors: rest offset, then the hips
+					var parentWorld = parents[n] < 0 ? Matrix4x4.Identity : world[parents[n]];
+					Matrix4x4.Invert(parentWorld, out var parentInverse);
+					local[n] = Decompose(target * parentInverse);
+				}
+			}
+			return still.Count;
+		}
+
+		Matrix4x4[] Worlds(Trs[] local)
+		{
+			var world = new Matrix4x4[nodes.Count];
+			for (int n = 0; n < nodes.Count; n++)
+			{
+				var m = Matrix4x4.CreateScale(local[n].S) * Matrix4x4.CreateFromQuaternion(local[n].R) * Matrix4x4.CreateTranslation(local[n].T);
+				world[n] = parents[n] < 0 ? m : m * world[parents[n]];
+			}
+			return world;
+		}
+
 		// For the client's tests: the skinning matrices (3x4 rows) of dash_ground frame 15, as built here.
 		void WriteReference(Trs[] local)
 		{
@@ -325,6 +390,9 @@ internal static class HeroPack
 		public Vector3 T, S;
 		public Quaternion R;
 	}
+
+	private static Matrix4x4 Compose(Trs x) =>
+		Matrix4x4.CreateScale(x.S) * Matrix4x4.CreateFromQuaternion(x.R) * Matrix4x4.CreateTranslation(x.T);
 
 	private static Trs Decompose(Matrix4x4 m)
 	{
