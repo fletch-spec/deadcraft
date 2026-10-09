@@ -5,9 +5,10 @@ import java.util.Arrays;
 /**
  * Picks and blends the hero's clips, standing in for Deadlock's own animation graph. Continuous
  * states come from the hero's motion: idle, eight-way run (crouched or not) with the play rate
- * following the speed, and fall. One-shot moves come from Deadlock's movement ability events (dash,
- * slide, mantle, jump and air jump), which say exactly when they start. A new state fades in over
- * {@link #FADE_S}.
+ * following the speed, fall, and slide (read from the hero's state: Deadlock lowers the collision
+ * hull for both a crouch and a slide, but only a crouch lowers the eye). One-shot moves come from
+ * Deadlock's movement ability events (dash, mantle, jump and air jump), which say exactly when they
+ * start. A new state fades in over {@link #FADE_S}.
  */
 public final class HeroAnimator {
 	/** One frame of what the hero is doing. Speeds in blocks per second, relative to facing. */
@@ -34,8 +35,9 @@ public final class HeroAnimator {
 	private float[] previousPose;
 	private final float[] pose;
 	private float standingEye, eye, slideEndedAt = -10, clock, turnRate, turnPhase, standingHull, hull;
-	/** Whether this slide lowered the hull: then the hull says when it ends; otherwise the speed does. */
-	private boolean slideHullLow;
+	/** How long the hero's state has said "sliding" (hull down, eye up); a tick's flicker isn't a slide. */
+	private float slideStateTime;
+	static final float SLIDE_ENTER_S = 0.03f;
 	private double speed;
 	private boolean grounded;
 	private String dashClip = "dash_ground", clipA = "", clipB = "";
@@ -65,12 +67,6 @@ public final class HeroAnimator {
 		if (n.contains("dash")) {
 			dashClip = in.grounded() ? "dash_ground" : "dash_air_" + airDirection(in);
 			start(State.DASH);
-		} else if (n.contains("slide")) {
-			// The slide ability fires on every crouch press; it's a slide only when moving fast.
-			if (move != State.SLIDE && in.grounded() && Math.hypot(in.forward(), in.right()) > runSpeed * 0.6) {
-				slideHullLow = false;
-				start(State.SLIDE);
-			}
 		} else if (n.contains("mantle")) {
 			start(State.MANTLE);
 		} else if (n.contains("jump")) {
@@ -101,7 +97,8 @@ public final class HeroAnimator {
 		grounded = in.grounded();
 		airTime = in.grounded() ? 0 : airTime + dt;
 		speed = Math.hypot(in.forward(), in.right());
-		if (state == State.SLIDE && hull < standingHull * 0.85f) slideHullLow = true;
+		boolean slideState = standingHull > 0 && hull < standingHull * 0.75f && eye >= standingEye * 0.9f;
+		slideStateTime = slideState ? slideStateTime + dt : 0;
 		boolean crouched = standingEye > 0 && in.eyeHeight() < standingEye * 0.8f;
 		if (move != null && !moveContinues(in, speed)) {
 			if (move == State.SLIDE) slideEndedAt = clock;
@@ -130,10 +127,6 @@ public final class HeroAnimator {
 		return switch (move) {
 			case DASH -> stateTime < Math.min(DASH_MAX_S, clipDuration(dashClip));
 			case MANTLE -> stateTime < clipDuration("mantle_64");
-			// A slide ends when Deadlock stands the hero up (hull back to full height), drops it into a
-			// crouch (eye at crouch height), or it leaves the ground; without a hull change, when it slows.
-			case SLIDE -> stateTime < 0.15f || in.grounded() && stateTime < 4f && in.eyeHeight() > standingEye * 0.8f
-				&& (slideHullLow ? hull < standingHull * 0.9f : speed > runSpeed * 0.9);
 			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f);
 			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded();
 			default -> false;
@@ -145,6 +138,7 @@ public final class HeroAnimator {
 			// Walked off an edge (no jump event): fall after a moment, so steps down don't flicker.
 			return airTime > 0.15f || state == State.FALL ? State.FALL : state;
 		}
+		if (slideStateTime >= SLIDE_ENTER_S || state == State.SLIDE && slideStateTime > 0) return State.SLIDE;
 		boolean moving = speed > 0.3;
 		if (crouched) return moving ? State.CROUCH_RUN : State.CROUCH_IDLE;
 		return moving ? State.RUN : State.IDLE;

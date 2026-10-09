@@ -34,7 +34,7 @@ public final class HeroRenderer {
 	/** Extra size on top of Deadlock's scale (1 = the hero's true size against Minecraft's blocks). */
 	private static float scale = 1.2f;  // chosen by eye 2026-10-10
 	/** The drawn body's yaw eases after the camera's instead of snapping with every mouse movement. */
-	private static final float BODY_EASE_S = 0.07f;
+	private static final float BODY_EASE_S = 0.1f;
 	private static float bodyYaw = Float.NaN;
 
 	private static String hero = "unicorn";
@@ -137,7 +137,7 @@ public final class HeroRenderer {
 		if (!still) idleTurning = true;
 		else if (Math.abs(diff) > IDLE_TURN_START) idleTurning = true;
 		else if (Math.abs(diff) < IDLE_TURN_STOP) idleTurning = false;
-		float step = idleTurning ? diff * (1 - (float) Math.exp(-dt / (still ? BODY_EASE_S * 2 : BODY_EASE_S))) : 0;
+		float step = idleTurning ? diff * (1 - (float) Math.exp(-dt / (still ? BODY_EASE_S * 2.5f : BODY_EASE_S))) : 0;
 		bodyYaw += step;
 		animator.setTurnRate(dt > 0 ? step / dt : 0);
 		float[] matrices = animator.update(input, dt);

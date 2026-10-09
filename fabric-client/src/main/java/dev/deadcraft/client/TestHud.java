@@ -7,13 +7,14 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 
 /**
- * Test readout in the top-left corner while linked ({@code /deadcraft hud}): frame rate and frame
- * times, how stale Deadlock's newest sample is, the raw-mouse camera's corrections, the animation
- * state and speed, and the hero model's cost. Refreshed once a second; each line covers that second.
+ * Test readout while linked ({@code /deadcraft hud}): frame rate and frame time in the top-left
+ * corner. Each second it also gathers how stale Deadlock's newest sample is, the raw-mouse camera's
+ * corrections, the animation state and the hero model's cost, which the log carries every 10 s.
  */
 final class TestHud {
 	private static boolean enabled = true;
 	private static final List<String> lines = new ArrayList<>();
+	private static String shown = "";
 	private static long windowStart;
 	private static int frames;
 	private static double frameSum, frameMax, ageSum, ageMax;
@@ -44,6 +45,7 @@ final class TestHud {
 		if (nowMs - windowStart < 1000) return;
 		windowStart = nowMs;
 		lines.clear();
+		shown = String.format("%.0f fps  %.2f ms", frames / (frameSum / 1000), frameSum / Math.max(1, frames));
 		lines.add(String.format("%.0f fps  frame %.2f ms avg, %.1f ms worst", frames / (frameSum / 1000), frameSum / Math.max(1, frames), frameMax));
 		lines.add(String.format("deadlock sample age %.1f ms avg, %.1f max", ageSum / Math.max(1, ageSamples), ageMax));
 		lines.add(Follow.timelineHudLine());
@@ -60,19 +62,16 @@ final class TestHud {
 
 	static void unlinked() {
 		lines.clear();
+		shown = "";
 		lastFrameTime = 0;
 		windowStart = 0;
 	}
 
+	/** On screen just frame rate and frame time; the full readout goes to the log every 10 s. */
 	static void draw(GuiGraphicsExtractor g) {
-		if (!enabled || !Follow.linked() || lines.isEmpty()) return;
+		if (!enabled || !Follow.linked() || shown.isEmpty()) return;
 		var font = Minecraft.getInstance().font;
-		int y = 4, width = 0;
-		for (String line : lines) width = Math.max(width, font.width(line));
-		g.fill(2, 2, 8 + width, 6 + lines.size() * (font.lineHeight + 1), 0x90000000);
-		for (String line : lines) {
-			g.text(font, line, 5, y, 0xFFFFFFFF, false);
-			y += font.lineHeight + 1;
-		}
+		g.fill(2, 2, 8 + font.width(shown), 6 + font.lineHeight, 0x90000000);
+		g.text(font, shown, 5, 4, 0xFFFFFFFF, false);
 	}
 }
