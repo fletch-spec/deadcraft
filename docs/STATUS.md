@@ -19,14 +19,14 @@ Reports: [feasibility](feasibility.md), [collider test](collider-test.md), [feel
 
 ## How to run it (desktop)
 
-Shortcuts: `.\tools\make-shortcuts.ps1` puts "Deadcraft 1 - Start the movement server", "2 - Join with your hero" (Deadlock, connects on start; close Deadlock first) and "3 - Show the Minecraft world" on the desktop. Once per hero: `dotnet run --project tools/hero-export unicorn` (Celeste). When the hero spawns on the void map the plugin sends `mat_fullbright 1` and `fps_max 122`. By hand:
+Shortcuts: `.\tools\make-shortcuts.ps1` puts "Deadcraft 1 - Start the movement server", "2 - Join with your hero" (Deadlock, connects on start; close Deadlock first) and "3 - Show the Minecraft world" on the desktop. Once per hero: `dotnet run --project tools/hero-export unicorn` (Celeste). Shortcut 2 starts Deadlock with `+fps_max 122` (`make-shortcuts.ps1 -DeadlockFps <n>` for another PC). By hand:
 
 1. `.\tools\run-server.ps1 -Map deadcraft_void`.
 2. Deadlock in **Borderless Window**: console `connect localhost:27067`, pick Celeste.
 3. `fabric-client\gradlew -p fabric-client runClient`, load the creative superflat world, `/deadcraft off` then `/deadcraft on`.
 4. Logs: `%TEMP%\deadcraft-plugin.log` (plugin: hull/flags changes, recentres, colliders), the dev client's `fabric-client\run\logs\latest.log` (every animation state change and ability event, and every 10 s a readout: fps and frame times, weather, Deadlock sample age, position delay, mouse corrections, hero cost). The dev client also records Java Flight Recorder data (`run\deadcraft.jfr` on a clean quit; snapshot a running client with `jcmd <pid> JFR.dump name=1 filename=...`).
 
-Client commands: `/deadcraft` status, `on`/`off`, `anchor`, `overlay on|off`, `camera [on|off|<distance> <right> <up>]`, `look [raw|deadlock|recalibrate]`, `delay [<ms>|0 for adaptive]`, `hero [<name>|on|off|scale <f>]`, `hud`. Server cvar: `deadcraft_deadlock_fps_max` (default 122).
+Client commands: `/deadcraft` status, `on`/`off`, `anchor`, `overlay on|off`, `camera [on|off|<distance> <right> <up>]`, `look [raw|deadlock|recalibrate]`, `delay [<ms>|0 for adaptive]`, `hero [<name>|on|off|scale <f>]`, `hud`.
 
 ## What Deadlock tells us (and what it doesn't)
 
@@ -46,7 +46,7 @@ A slide is hull low with the eye up. Wall proximity comes from Minecraft's own b
 
 - Colliders: `prop_dynamic` with `citadel_center_cube_01`, model collision, uniform `ModelScale`, hidden by setting EF_NODRAW in `m_fEffects` after spawn (the `rendermode` keyvalue is ignored). Never resize `Collision.Mins/Maxs` (crashes). Never force entities into a client's transmit list (crashed `engine2.dll` four times).
 - Everything must stay over the void map's slab (centre 4096, 4096, top z 512). The map is compiled **without** visibility data. Never recentre while Minecraft is unlinked.
-- The GPU is shared: Deadlock uncapped (fps_max 400) took Minecraft from ~460 to ~70 fps while moving. Deadlock at 122 leaves Minecraft ~350 fps moving and still reads input smoothly (30 felt sluggish). A command sent as a client disconnects never arrives, so the normal cap is restored by `fps_max 400` in Deadlock's `game\citadel\cfg\autoexec.cfg` (added on this PC; a Steam verify may empty it).
+- The GPU is shared: Deadlock uncapped (fps_max 400) took Minecraft from ~460 to ~70 fps while moving. Deadlock at 122 leaves Minecraft ~350 fps moving and still reads input smoothly (30 felt sluggish). The server **can't** set it: Deadlock ignores `fps_max` and `mat_fullbright` sent by a server (Deadworks `Server.ClientCommand` reports nothing). So shortcut 2 launches Deadlock with `+fps_max 122`, and normal launches are restored by `fps_max 400` in Deadlock's `game\citadel\cfg\autoexec.cfg` (added on this PC; a Steam verify may empty it).
 - Rain costs vanilla Minecraft a lot at 3440x1440 (~93 fps).
 - Seqlock readers must spin-wait. The plugin retries the bridge every 2 s, so a protocol bump only needs a Minecraft restart.
 - 26.3 names: `gui.setScreen`, `Player.sendOverlayMessage`, `calculateFov` is on `Camera`, entity rendering is `submit` + `SubmitNodeCollector.submitCustomGeometry`, HUD is Fabric's `HudElementRegistry` with `GuiGraphicsExtractor`. Verify with `javap` against the Loom jar (beware piping two classes into one grep).

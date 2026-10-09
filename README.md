@@ -57,7 +57,7 @@ Filled in as each component lands.
    ```
    .\tools\compile-map.ps1
    ```
-7. Start a local server, then in Deadlock's console run `connect localhost:27067` (and `mat_fullbright 1`; the map is unlit):
+7. Start a local server, then in Deadlock's console run `connect localhost:27067` and `fps_max 122` (Deadlock is hidden under Minecraft; uncapped it takes the GPU Minecraft needs):
    ```
    .\tools\run-server.ps1 -Map deadcraft_void
    ```

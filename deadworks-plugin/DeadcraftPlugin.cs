@@ -42,11 +42,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private float _lastHull;
 	private uint _lastEntityFlags;
 
-	public override void OnLoad(bool isReload)
-	{
-		DeadlockFrameCap.Register();
-		TryOpenBridge();
-	}
+	public override void OnLoad(bool isReload) => TryOpenBridge();
 
 	// A mapping held open by a Minecraft client on another protocol version can't be used; retry until
 	// that client closes (or restarts on a matching build) instead of needing a server restart.
@@ -67,21 +63,6 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	}
 
 	public override void OnPrecacheResources() => Precache.AddResource(ColliderPool.Model);
-
-	// Each time the hero comes alive on the void map (spawn and respawn; OnPawnHeroInitialized doesn't fire
-	// for a hero picked in hero select): fullbright, as the map has no baked light (a cheat convar;
-	// sv_cheats is on for this map), and Deadlock's frame cap for Deadcraft (DeadlockFrameCap).
-	private void SendClientSettings(CCitadelPlayerPawn pawn)
-	{
-		if (Server.MapName != VoidMap || pawn.IsBot || pawn.Controller == null) return;
-		Server.ExecuteCommand("sv_cheats 1");
-		Server.ClientCommand(pawn.Controller.Slot, "mat_fullbright 1");
-		int cap = DeadlockFrameCap.WhilePlaying();
-		int? original = DeadlockFrameCap.Original(out string? problem);
-		Server.ClientCommand(pawn.Controller.Slot, $"fps_max {cap}");
-		Log($"mat_fullbright 1 and fps_max {cap} sent to slot {pawn.Controller.Slot}; their saved fps_max is "
-			+ (original?.ToString() ?? $"unknown ({problem ?? "no Deadlock settings found"})") + " (autoexec.cfg restores it at launch)");
-	}
 
 	public override void OnUnload()
 	{
@@ -106,11 +87,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		var hero = FindHero();
 		bool alive = hero != null && hero.IsAlive;
 		if (!alive) _aliveSince = -1f;
-		else if (_aliveSince < 0)
-		{
-			_aliveSince = GlobalVars.CurTime;
-			SendClientSettings(hero!);
-		}
+		else if (_aliveSince < 0) _aliveSince = GlobalVars.CurTime;
 		// Deadlock rejects the void map's spawn entities and spawns heroes at the world origin, the
 		// slab's corner, sometimes twice per spawn. Nothing else ever puts a hero there (home is over
 		// the slab's centre), so a hero near the origin has just spawned: move it to the centre.
