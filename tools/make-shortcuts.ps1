@@ -29,6 +29,7 @@ New-Shortcut 'Deadcraft 1 - Start the movement server' "$env:SystemRoot\System32
 	"-NoExit -ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void" $repo $null
 New-Shortcut 'Deadcraft 2 - Join with your hero' $steam `
 	"-applaunch $deadlockAppId -console +connect localhost:27067" (Split-Path $steam) $steam
-# cmd /k strips the outermost pair of quotes, so the whole command line is wrapped in one more pair.
+# The window closes with Minecraft, or stays open to show the error if the build or game fails.
+# cmd /c strips the outermost pair of quotes, so the whole command line is wrapped in one more pair.
 New-Shortcut 'Deadcraft 3 - Show the Minecraft world' "$env:SystemRoot\System32\cmd.exe" `
-	"/k `"`"$repo\fabric-client\gradlew.bat`" -p `"$repo\fabric-client`" runClient`"" "$repo\fabric-client" $null
+	"/c `"`"$repo\fabric-client\gradlew.bat`" -p `"$repo\fabric-client`" runClient || pause`"" "$repo\fabric-client" $null
