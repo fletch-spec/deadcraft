@@ -174,7 +174,8 @@ internal static class HeroPack
 		armature.SetPoseTransforms();
 		var rest = nodes.Select(l => Decompose(armature.LogicalNodes[l].LocalMatrix)).ToArray();
 		// Clips carry their own travel on the root_motion joint (a dash moves the body forward). The real
-		// movement comes from Deadlock, so root_motion keeps its rest position (its turn stays).
+		// movement comes from Deadlock, so root_motion keeps its rest position (its turn stays), and the
+		// joints beside it lose the same travel.
 		int rootMotion = nodes.FindIndex(l => model.LogicalNodes[l].Name == "root_motion");
 		Console.WriteLine($"pack: skeleton {nodes.Count} nodes, {skinTable.Length} skinned joints" + (rootMotion < 0 ? ", no root_motion joint" : ""));
 
@@ -182,6 +183,7 @@ internal static class HeroPack
 		var tracks = armature.AnimationTracks;
 		var clipData = new List<(string Name, bool Loop, int Frames, float[] Locals)>();
 		double worstCheck = 0;
+		string worstAt = "";
 		foreach (var (clipName, loop) in Clips)
 		{
 			int track = -1;
@@ -199,13 +201,23 @@ internal static class HeroPack
 			{
 				armature.SetAnimationFrame(track, Math.Min(duration, f / Fps), loop);
 				var local = nodes.Select(l => Decompose(armature.LogicalNodes[l].LocalMatrix)).ToArray();
-				if (f == 0) worstCheck = Math.Max(worstCheck, Check(local, instance.ToArray()));
-				if (rootMotion >= 0) local[rootMotion].T = rest[rootMotion].T;
+				double err = Check(local, instance.ToArray());
+				if (err > worstCheck) { worstCheck = err; worstAt = $"{clipName} frame {f}"; }
+				if (rootMotion >= 0)
+				{
+					// The same travel is baked into the joints beside root_motion (196 cloth bones for Celeste,
+					// simulated in the clip's space): take it off them too, or the skirt is left metres behind.
+					var travel = local[rootMotion].T - rest[rootMotion].T;
+					for (int n = 0; n < nodes.Count; n++)
+						if (n != rootMotion && parents[n] == parents[rootMotion]) local[n].T -= travel;
+					local[rootMotion].T = rest[rootMotion].T;
+				}
 				for (int n = 0; n < nodes.Count; n++) Put(locals, (f * nodes.Count + n) * 10, local[n]);
+				if (clipName == "dash_ground" && f == 15) WriteReference(local);
 			}
 			clipData.Add((clipName, loop, frames, locals));
 		}
-		Console.WriteLine($"pack: {clipData.Count} clips, {clipData.Sum(c => c.Frames)} frames; rebuilt skinning differs from the exporter's by at most {worstCheck:E1}");
+		Console.WriteLine($"pack: {clipData.Count} clips, {clipData.Sum(c => c.Frames)} frames; rebuilt skinning differs from the exporter's by at most {worstCheck:E1} ({worstAt})");
 		if (worstCheck > 1e-3) throw new InvalidOperationException("skeleton rebuild doesn't match the exporter's skinning; refusing to write a broken pack");
 
 		// ---- write ----
@@ -266,6 +278,24 @@ internal static class HeroPack
 			var bytes = Encoding.UTF8.GetBytes(s);
 			w.Write(bytes.Length);
 			w.Write(bytes);
+		}
+
+		// For the client's tests: the skinning matrices (3x4 rows) of dash_ground frame 15, as built here.
+		void WriteReference(Trs[] local)
+		{
+			var world = new Matrix4x4[nodes.Count];
+			for (int n = 0; n < nodes.Count; n++)
+			{
+				var m = Matrix4x4.CreateScale(local[n].S) * Matrix4x4.CreateFromQuaternion(local[n].R) * Matrix4x4.CreateTranslation(local[n].T);
+				world[n] = parents[n] < 0 ? m : m * world[parents[n]];
+			}
+			using var r = new BinaryWriter(File.Create(Path.ChangeExtension(outPath, ".reference")));
+			r.Write(skinTable.Length);
+			foreach (var (node, ib) in skinTable)
+			{
+				var x = ib * world[node];
+				foreach (float v in new[] { x.M11, x.M21, x.M31, x.M41, x.M12, x.M22, x.M32, x.M42, x.M13, x.M23, x.M33, x.M43 }) r.Write(v);
+			}
 		}
 
 		// Rebuilds skinning matrices from the locals, as the Minecraft client will, and compares them with

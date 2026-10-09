@@ -76,6 +76,17 @@ public final class HeroModel {
 		return skinNodes.length;
 	}
 
+	/** The named nodes and everything below them. */
+	public boolean[] subtree(String... names) {
+		boolean[] in = new boolean[nodeCount()];
+		for (String name : names) {
+			int n = node(name);
+			if (n >= 0) in[n] = true;
+		}
+		for (int n = 0; n < in.length; n++) if (parents[n] >= 0 && in[parents[n]]) in[n] = true;  // parents come first
+		return in;
+	}
+
 	public int node(String name) {
 		for (int i = 0; i < nodeNames.length; i++) if (nodeNames[i].equals(name)) return i;
 		return -1;
@@ -237,7 +248,13 @@ public final class HeroModel {
 
 		/** This pose blended towards {@code other} by {@code a} (0 = this, 1 = other), into this. */
 		public void blendTowards(Pose other, float a) {
+			blendTowards(other, a, null);
+		}
+
+		/** As {@link #blendTowards(Pose, float)}, only for the nodes {@code mask} marks (all if null). */
+		public void blendTowards(Pose other, float a, boolean[] mask) {
 			for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
+				if (mask != null && !mask[n]) continue;
 				int i = n * TRS;
 				for (int k = 0; k < 3; k++) trs[i + k] += (other.trs[i + k] - trs[i + k]) * a;
 				for (int k = 7; k < 10; k++) trs[i + k] += (other.trs[i + k] - trs[i + k]) * a;

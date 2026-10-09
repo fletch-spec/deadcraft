@@ -40,16 +40,21 @@ public final class HeroAnimator {
 	static final float LAND_AFTER_S = 0.45f, STOP_FROM_SPEED = 3f;
 	/** The upper body turns at most this far from the feet, degrees. */
 	static final float LOOK_LIMIT = 75f;
-	/** Shares of the upper-body turn, lower spine to head (Celeste's joint names). */
-	private static final String[] LOOK_NODES = {"spine_1", "spine_2", "spine_3", "neck_0", "head"};
-	private static final float[] LOOK_SHARES = {0.15f, 0.2f, 0.2f, 0.2f, 0.25f};
+	/**
+	 * Shares of the upper-body turn, lower spine to head (Celeste's joint names). The weapon hangs off
+	 * the skeleton's root, not the hand (Deadlock pins it to the hand), so it takes the whole turn.
+	 */
+	private static final String[] LOOK_NODES = {"spine_1", "spine_2", "spine_3", "neck_0", "head", "weaponPivot"};
+	private static final float[] LOOK_SHARES = {0.15f, 0.2f, 0.2f, 0.2f, 0.25f, 1f};
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
 	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, AIR_JUMP, FALL, SLIDE, DASH, MANTLE, WALL, LAND, STOP }
 
 	private final HeroModel model;
-	private final HeroModel.Pose pose, previous, shown;
+	private final HeroModel.Pose pose, previous, shown, steps;
+	/** The legs, for stepping round on the spot without moving the hips. */
+	private final boolean[] legs;
 	private final float[] world, skin;
 	private final int[] lookNodes;
 	private final float[] lookShares;
@@ -72,6 +77,8 @@ public final class HeroAnimator {
 		pose = model.newPose();
 		previous = model.newPose();
 		shown = model.newPose();
+		steps = model.newPose();
+		legs = model.subtree("leg_upper_L", "leg_upper_R");
 		world = new float[model.nodeCount() * 12];
 		skin = new float[model.skinnedJointCount() * 12];
 		int found = 0;
@@ -249,14 +256,21 @@ public final class HeroAnimator {
 	}
 
 	/**
-	 * Standing still: the idle, with sideways steps blended in while the body turns on the spot
-	 * (Celeste has no standing turn clips; the strafe run at a slow phase reads as stepping round).
+	 * Standing still: the idle, with sideways steps while the body turns on the spot (Celeste has no
+	 * standing turn clips; the strafe run at a slow phase reads as stepping round). The steps go into
+	 * the legs only: blended into the whole body they lowered the hips, a visible dip.
 	 */
 	private void idle(String idleClip, String runPrefix) {
-		float w = Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 0.7f;
 		HeroModel.Clip c = model.clips.get(idleClip);
-		if (c != null) pose.add(c, stateTime, 1 - w);
-		if (w > 0) playPhase(runPrefix + (turnRate > 0 ? "e" : "w"), turnPhase, w);
+		if (c != null) pose.add(c, stateTime, 1);
+		float w = Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 0.7f;
+		HeroModel.Clip step = model.clips.get(runPrefix + (turnRate > 0 ? "e" : "w"));
+		if (w <= 0 || step == null) return;
+		pose.finish();
+		steps.clear();
+		steps.add(step, turnPhase * step.duration(), 1);
+		steps.finish();
+		pose.blendTowards(steps, w, legs);
 	}
 
 	/** The two run clips around the movement direction, blended by angle, at the shared phase. */
