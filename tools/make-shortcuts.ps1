@@ -22,9 +22,10 @@ function New-Shortcut($name, $target, $arguments, $workDir, $icon) {
 	Write-Host "Created $name"
 }
 
-New-Shortcut 'Deadcraft 1 - Server' 'powershell.exe' `
+New-Shortcut 'Deadcraft 1 - Server' "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
 	"-NoExit -ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void" $repo $null
 New-Shortcut 'Deadcraft 2 - Deadlock' $steam `
 	"-applaunch $deadlockAppId -console +connect localhost:27067" (Split-Path $steam) $steam
-New-Shortcut 'Deadcraft 3 - Minecraft' 'cmd.exe' `
-	"/k `"$repo\fabric-client\gradlew.bat`" -p `"$repo\fabric-client`" runClient" "$repo\fabric-client" $null
+# cmd /k strips the outermost pair of quotes, so the whole command line is wrapped in one more pair.
+New-Shortcut 'Deadcraft 3 - Minecraft' "$env:SystemRoot\System32\cmd.exe" `
+	"/k `"`"$repo\fabric-client\gradlew.bat`" -p `"$repo\fabric-client`" runClient`"" "$repo\fabric-client" $null
