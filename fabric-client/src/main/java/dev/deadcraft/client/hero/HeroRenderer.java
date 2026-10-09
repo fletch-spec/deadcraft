@@ -38,6 +38,8 @@ public final class HeroRenderer {
 	 * jumping to full speed, and settles without a long tail. Settling times, seconds.
 	 */
 	private static final float BODY_SETTLE_MOVING_S = 0.12f, BODY_SETTLE_STILL_S = 0.3f;
+	/** Fastest the body turns, degrees/s: a fast mouse swing turns the camera, the body catches up. */
+	private static final float BODY_MAX_SPEED_MOVING = 720f, BODY_MAX_SPEED_STILL = 400f;
 	private static float bodyYaw = Float.NaN, bodyYawSpeed;
 
 	private static String hero = "unicorn";
@@ -148,6 +150,8 @@ public final class HeroRenderer {
 			for (int i = 0; i < steps; i++) {
 				float d = ((target - bodyYaw) % 360 + 540) % 360 - 180;
 				bodyYawSpeed += (omega * omega * d - 2 * omega * bodyYawSpeed) * h;
+				float max = still ? BODY_MAX_SPEED_STILL : BODY_MAX_SPEED_MOVING;
+				bodyYawSpeed = Math.max(-max, Math.min(max, bodyYawSpeed));
 				bodyYaw += bodyYawSpeed * h;
 			}
 		} else {

@@ -19,6 +19,13 @@ public final class HeroAnimator {
 	static float runSpeed = 5f;
 	/** Deadlock's dash is a short burst; the clip's tail is a recovery to standing, which we skip. */
 	static final float DASH_MAX_S = 0.4f;
+	/**
+	 * Deadlock's mantle is quicker than the clip, whose tail is a stand-up we never want (Deadlock often
+	 * hands straight into a slide). The climb plays sped up and ends early.
+	 */
+	static final float MANTLE_RATE = 1.4f, MANTLE_MAX_S = 0.6f;
+	/** Run/idle switching with a margin, so speeds near the line don't flicker between the two. */
+	static final double MOVE_START = 0.5, MOVE_STOP = 0.2;
 	/** Body turn speed (degrees/s) at which standing feet fully step. */
 	static final float TURN_STEP_RATE = 240f;
 
@@ -129,7 +136,8 @@ public final class HeroAnimator {
 	private boolean moveContinues(Input in, double speed) {
 		return switch (move) {
 			case DASH -> stateTime < Math.min(DASH_MAX_S, clipDuration(dashClip));
-			case MANTLE -> stateTime < clipDuration("mantle_64");
+			// Ends as soon as Deadlock says what comes next: a slide, or standing on the ledge.
+			case MANTLE -> stateTime < MANTLE_MAX_S && slideStateTime < SLIDE_ENTER_S && !(in.grounded() && stateTime > 0.2f);
 			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f);
 			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded();
 			default -> false;
@@ -142,7 +150,11 @@ public final class HeroAnimator {
 			return airTime > 0.15f || state == State.FALL ? State.FALL : state;
 		}
 		if (slideStateTime >= SLIDE_ENTER_S || state == State.SLIDE && slideStateTime > 0) return State.SLIDE;
-		boolean moving = speed > 0.3;
+		// Climbing a step barely moves sideways: going up counts as moving too.
+		double motion = Math.max(speed, Math.abs(in.up()));
+		boolean wasMoving = state == State.RUN || state == State.CROUCH_RUN;
+		boolean moving = wasMoving ? motion > MOVE_STOP || stateTime < 0.15f : motion > MOVE_START;
+		if (!wasMoving && (state == State.IDLE || state == State.CROUCH_IDLE) && stateTime < 0.1f) moving = false;
 		if (crouched) return moving ? State.CROUCH_RUN : State.CROUCH_IDLE;
 		return moving ? State.RUN : State.IDLE;
 	}
@@ -156,7 +168,7 @@ public final class HeroAnimator {
 			case JUMP -> play("jump_ground", stateTime);
 			case AIR_JUMP -> play("jump_air", stateTime);
 			case FALL -> play("in_air_loop_down", stateTime);
-			case MANTLE -> play("mantle_64", stateTime);
+			case MANTLE -> play("mantle_64", stateTime * MANTLE_RATE);
 			case DASH -> play(dashClip, stateTime);
 			case SLIDE -> {
 				float start = clipDuration("slide_start");
