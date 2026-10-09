@@ -66,8 +66,12 @@ public final class HeroAnimator {
 	private final float[] world, skin;
 	private final int[] lookNodes;
 	private final float[] lookShares;
-	/** The weapon hangs off the skeleton's root (Deadlock pins it to the hand): it follows the right hand. */
+	/**
+	 * The weapon hangs off the skeleton's root (Deadlock pins it to the hand): it is held in the right
+	 * hand at the grip it has in the standing idle, in every clip.
+	 */
 	private final int weapon, hand;
+	private final float[] grip;
 	private State state = State.IDLE;
 	/** A move started by an ability event or the motion, held until it ends. */
 	private State move;
@@ -103,6 +107,17 @@ public final class HeroAnimator {
 		}
 		weapon = model.node("weaponPivot");
 		hand = model.node("hand_R");
+		HeroModel.Clip idle = model.clips.get("out_of_combat_stand_idle");
+		if (weapon >= 0 && hand >= 0 && idle != null) {
+			HeroModel.Pose p = model.newPose();
+			p.add(idle, 0, 1);
+			p.finish();
+			model.skin(p, world, 0, new int[0], new float[0], skin);
+			grip = new float[12];
+			HeroModel.relative(world, weapon, hand, grip);
+		} else {
+			grip = null;
+		}
 		lookNodes = java.util.Arrays.copyOf(nodes, found);
 		lookShares = java.util.Arrays.copyOf(shares, found);
 	}
@@ -213,7 +228,7 @@ public final class HeroAnimator {
 		shown.copyFrom(previous);
 		shown.blendTowards(pose, fade < 1 ? smooth(fade) : 1);
 		// Model space turns the other way round from Minecraft's yaw (the renderer turns by -yaw).
-		model.skin(shown, world, (float) -Math.toRadians(look), lookNodes, lookShares, weapon, hand, skin);
+		model.skin(shown, world, (float) -Math.toRadians(look), lookNodes, lookShares, weapon, hand, grip, skin);
 		return skin;
 	}
 

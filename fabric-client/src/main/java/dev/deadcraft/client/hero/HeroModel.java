@@ -334,27 +334,22 @@ public final class HeroModel {
 	 * position: children inherit it, so the shares add up along a chain such as spine to head.
 	 */
 	public void skin(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares, float[] out) {
-		skin(pose, world, twist, twistNodes, twistShares, -1, -1, out);
+		skin(pose, world, twist, twistNodes, twistShares, -1, -1, null, out);
 	}
 
 	/**
-	 * As above, and {@code follower} (with everything below it) keeps the placement relative to
-	 * {@code leader} that it has without the twist: Celeste's weapon hangs off the skeleton's root, not
-	 * her hand (Deadlock pins it there), so otherwise the twist turns the hand away from it.
+	 * As above, and {@code follower} (with everything below it) is held at {@code grip} (a 3x4 placement
+	 * relative to {@code leader}, see {@link #relative}): Celeste's weapon hangs off the skeleton's root,
+	 * not her hand (Deadlock pins it there at runtime), so on its own it drifts from the hand in some
+	 * clips, in layered clips and under the upper-body twist.
 	 */
-	public void skin(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares, int follower, int leader, float[] out) {
+	public void skin(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares, int follower, int leader, float[] grip,
+		float[] out) {
 		build(pose, world, twist, twistNodes, twistShares);
-		if (twist != 0 && follower >= 0 && leader >= 0) {
-			if (untwisted == null || untwisted.length != world.length) untwisted = new float[world.length];
-			build(pose, untwisted, 0, twistNodes, twistShares);
-			float[] offset = new float[12], placed = new float[12];
-			inverse(untwisted, leader * 12, offset);
+		if (follower >= 0 && leader >= 0 && grip != null) {
 			int fo = follower * 12;
-			float[] u = untwisted;
-			mul(offset, 0, u[fo], u[fo + 1], u[fo + 2], u[fo + 3], u[fo + 4], u[fo + 5], u[fo + 6], u[fo + 7], u[fo + 8], u[fo + 9],
-				u[fo + 10], u[fo + 11], placed, 0);
-			mul(world, leader * 12, placed[0], placed[1], placed[2], placed[3], placed[4], placed[5], placed[6], placed[7], placed[8],
-				placed[9], placed[10], placed[11], world, fo);
+			mul(world, leader * 12, grip[0], grip[1], grip[2], grip[3], grip[4], grip[5], grip[6], grip[7], grip[8], grip[9], grip[10],
+				grip[11], world, fo);
 			// Everything below the follower again, from its new place (parents come first).
 			boolean[] below = new boolean[nodeCount()];
 			below[follower] = true;
@@ -372,7 +367,14 @@ public final class HeroModel {
 		}
 	}
 
-	private float[] untwisted;
+	/** Node {@code node}'s placement relative to node {@code to}, from built world matrices, into out[0..12]. */
+	public static void relative(float[] world, int node, int to, float[] out) {
+		float[] inv = new float[12];
+		inverse(world, to * 12, inv);
+		int o = node * 12;
+		mul(inv, 0, world[o], world[o + 1], world[o + 2], world[o + 3], world[o + 4], world[o + 5], world[o + 6], world[o + 7], world[o + 8],
+			world[o + 9], world[o + 10], world[o + 11], out, 0);
+	}
 
 	/** World matrices of every node from {@code pose}, with the upper-body twist. */
 	private void build(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares) {

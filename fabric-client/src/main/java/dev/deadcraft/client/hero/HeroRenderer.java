@@ -34,12 +34,12 @@ public final class HeroRenderer {
 	/** Extra size on top of Deadlock's scale (1 = the hero's true size against Minecraft's blocks). */
 	private static float scale = 1.2f;  // chosen by eye 2026-10-10
 	/**
-	 * The drawn body's yaw follows the camera's on a critically damped spring: it eases in instead of
-	 * jumping to full speed, and settles without a long tail. Settling times, seconds.
+	 * Moving, the drawn body's yaw follows the camera's on a critically damped spring: it eases in
+	 * instead of jumping to full speed, and settles without a long tail. Settling time, seconds.
 	 */
-	private static final float BODY_SETTLE_MOVING_S = 0.12f, BODY_SETTLE_STILL_S = 0.3f;
-	/** Fastest the body turns, degrees/s: a fast mouse swing turns the camera, the body catches up. */
-	private static final float BODY_MAX_SPEED_MOVING = 720f, BODY_MAX_SPEED_STILL = 400f;
+	private static final float BODY_SETTLE_MOVING_S = 0.12f;
+	/** Fastest the body turns while moving, degrees/s: a fast mouse swing turns the camera, the body catches up. */
+	private static final float BODY_MAX_SPEED_MOVING = 720f;
 	private static float bodyYaw = Float.NaN, bodyYawSpeed;
 
 	private static String hero = "unicorn";
@@ -52,9 +52,12 @@ public final class HeroRenderer {
 	private static float[] skinned, skinnedNormals;
 	private static long lastNanos;
 	private static HeroAnimator.Input input = new HeroAnimator.Input(0, 0, 0, true, 0, 0, HeroAnimator.Wall.NONE);
-	/** Standing still, the body stays put until the camera is this far round, then steps to face it. */
-	private static final float IDLE_TURN_START = 55f, IDLE_TURN_STOP = 5f;
-	private static boolean idleTurning;
+	/**
+	 * Standing still, the body stays put until the camera is this far round (degrees), then steps to
+	 * face it, overshooting by STEP_LEAD, in STEP_S seconds.
+	 */
+	private static final float IDLE_TURN_START = 55f, STEP_LEAD = 10f, STEP_S = 0.3f;
+	private static float stepTime = -1, stepFrom, stepBy;
 
 	private HeroRenderer() {}
 
@@ -139,19 +142,33 @@ public final class HeroRenderer {
 		if (Float.isNaN(bodyYaw) || dt <= 0) bodyYaw = target;
 		float diff = ((target - bodyYaw) % 360 + 540) % 360 - 180;
 		boolean still = Math.hypot(input.forward(), input.right()) < 0.3 && input.grounded();
-		if (!still) idleTurning = true;
-		else if (Math.abs(diff) > IDLE_TURN_START) idleTurning = true;
-		else if (Math.abs(diff) < IDLE_TURN_STOP && Math.abs(bodyYawSpeed) < 30) idleTurning = false;
-		if (idleTurning && dt > 0) {
-			float omega = 2f / (still ? BODY_SETTLE_STILL_S : BODY_SETTLE_MOVING_S) * 2.2f;  // ~settled after the settling time
+		if (still && dt > 0) {
+			// Standing: the head turns alone until it reaches its limit, then the feet take one quick step
+			// round to face the camera (a little past it, in the turn's direction) and stop, as in
+			// Deadlock: head, step, head, step. A turn that keeps going takes another step.
+			if (stepTime < 0 && Math.abs(diff) > IDLE_TURN_START) {
+				stepFrom = bodyYaw;
+				stepBy = diff + Math.signum(diff) * STEP_LEAD;
+				stepTime = 0;
+			}
+			float before = bodyYaw;
+			if (stepTime >= 0) {
+				stepTime = Math.min(STEP_S, stepTime + dt);
+				float p = stepTime / STEP_S;
+				bodyYaw = stepFrom + stepBy * p * p * (3 - 2 * p);
+				if (stepTime >= STEP_S) stepTime = -1;
+			}
+			bodyYawSpeed = (((bodyYaw - before) % 360 + 540) % 360 - 180) / dt;
+		} else if (dt > 0) {
+			stepTime = -1;
+			float omega = 2f / BODY_SETTLE_MOVING_S * 2.2f;  // ~settled after the settling time
 			// Semi-implicit Euler, sub-stepped so long frames stay stable.
 			int steps = Math.max(1, (int) Math.ceil(dt / 0.004f));
 			float h = dt / steps;
 			for (int i = 0; i < steps; i++) {
 				float d = ((target - bodyYaw) % 360 + 540) % 360 - 180;
 				bodyYawSpeed += (omega * omega * d - 2 * omega * bodyYawSpeed) * h;
-				float max = still ? BODY_MAX_SPEED_STILL : BODY_MAX_SPEED_MOVING;
-				bodyYawSpeed = Math.max(-max, Math.min(max, bodyYawSpeed));
+				bodyYawSpeed = Math.max(-BODY_MAX_SPEED_MOVING, Math.min(BODY_MAX_SPEED_MOVING, bodyYawSpeed));
 				bodyYaw += bodyYawSpeed * h;
 			}
 		} else {

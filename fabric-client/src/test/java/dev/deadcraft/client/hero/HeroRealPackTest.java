@@ -150,27 +150,24 @@ class HeroRealPackTest {
 		assertTrue(worst < SKIRT_REACH, "skirt " + worst + " m from the hips during the landing; see build/skirt-landing.txt");
 	}
 
-	/** With the upper body turned towards the camera, the wand stays in the right hand. */
+	/** In every clip (layered ones too) and with the upper body turned, the wand keeps its grip in the right hand. */
 	@Test
 	void wandStaysInTheHand() throws Exception {
 		HeroModel m = celeste();
 		int weapon = m.node("weaponPivot"), hand = m.node("hand_R");
 		int[] look = {m.node("spine_1"), m.node("spine_2"), m.node("spine_3"), m.node("neck_0"), m.node("head")};
 		float[] shares = {0.15f, 0.2f, 0.2f, 0.2f, 0.25f};
-		HeroModel.Pose pose = m.newPose();
-		pose.add(m.clips.get("out_of_combat_stand_idle"), 0.3f, 1);
-		pose.finish();
 		float[] world = new float[m.nodeCount() * 12], skin = new float[m.skinnedJointCount() * 12];
-		m.skin(pose, world, 0, look, shares, weapon, hand, skin);
-		double straight = distance(world, weapon, hand);
-		m.skin(pose, world, (float) Math.toRadians(60), look, shares, weapon, hand, skin);
-		double turned = distance(world, weapon, hand);
-		assertTrue(Math.abs(turned - straight) < 1e-3, "wand to hand " + straight + " m straight, " + turned + " m turned");
-	}
-
-	private static double distance(float[] world, int a, int b) {
-		double dx = world[a * 12 + 3] - world[b * 12 + 3], dy = world[a * 12 + 7] - world[b * 12 + 7], dz = world[a * 12 + 11] - world[b * 12 + 11];
-		return Math.sqrt(dx * dx + dy * dy + dz * dz);
+		m.skin(sample(m, m.clips.get("out_of_combat_stand_idle"), 0), world, 0, look, shares, skin);
+		float[] grip = new float[12], held = new float[12];
+		HeroModel.relative(world, weapon, hand, grip);
+		for (HeroModel.Clip c : m.clips.values()) {
+			for (int f = 0; f < c.frames(); f += 3) {
+				m.skin(sample(m, c, f / c.fps()), world, (float) Math.toRadians(35), look, shares, weapon, hand, grip, skin);
+				HeroModel.relative(world, weapon, hand, held);
+				for (int k = 0; k < 12; k++) assertTrue(Math.abs(held[k] - grip[k]) < 1e-3, c.name() + " frame " + f + ": wand off its grip");
+			}
+		}
 	}
 
 	/** The skirt (vertices hanging mainly from cloth bones) stays near the hips in every clip and frame. */
