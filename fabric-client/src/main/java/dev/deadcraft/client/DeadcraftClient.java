@@ -2,6 +2,7 @@ package dev.deadcraft.client;
 
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.FloatArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -35,6 +36,10 @@ public final class DeadcraftClient implements ClientModInitializer {
 					.then(ClientCommands.argument("ms", FloatArgumentType.floatArg(0, 100))
 						.executes(c -> reply(c.getSource(), Follow.delay(FloatArgumentType.getFloat(c, "ms")))))
 					.executes(c -> reply(c.getSource(), Follow.delay(null))))
+				.then(ClientCommands.literal("hero")
+					.then(ClientCommands.argument("name", StringArgumentType.word())
+						.executes(c -> reply(c.getSource(), Follow.hero(StringArgumentType.getString(c, "name")))))
+					.executes(c -> reply(c.getSource(), Follow.hero(null))))
 				.then(ClientCommands.literal("overlay")
 					.then(ClientCommands.literal("on").executes(c -> reply(c.getSource(), Follow.setOverlay(true))))
 					.then(ClientCommands.literal("off").executes(c -> reply(c.getSource(), Follow.setOverlay(false)))))

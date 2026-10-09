@@ -7,6 +7,8 @@ import dev.deadcraft.protocol.Mapping;
 import dev.deadcraft.protocol.Proto;
 import dev.deadcraft.protocol.Vec3;
 import java.util.Optional;
+import dev.deadcraft.client.hero.HeroAnimator;
+import dev.deadcraft.client.hero.HeroRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
@@ -136,6 +138,16 @@ public final class Follow {
 		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
 
 		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z());
+		{
+			// Hero model animation: velocity relative to where the body faces.
+			Vec3 hv = Proto.toMinecraft(hero.velocity);
+			double yawRad = Math.toRadians(player.yBodyRot);
+			double fx = -Math.sin(yawRad), fz = Math.cos(yawRad);  // Minecraft facing at this yaw
+			double forward = hv.x() * fx + hv.z() * fz, right = -(hv.x() * fz - hv.z() * fx);
+			HeroRenderer.setInput(new HeroAnimator.Input(forward, right, hv.y(), (hero.flags & HeroFlags.ON_GROUND) != 0,
+				(float) (hero.eyePosition.z() - hero.position.z())));
+			speedMax = Math.max(speedMax, Math.hypot(forward, right));
+		}
 		Vec3 v = Proto.toMinecraft(hero.velocity);
 		timeline.add(new HeroTimeline.Sample(hero.tick, hero.serverTime, heroBlocks.x(), heroBlocks.y(), heroBlocks.z(),
 			hero.cameraAngles.y(), hero.cameraAngles.x(), v.x(), v.y(), v.z()), localNow);
@@ -192,7 +204,7 @@ public final class Follow {
 
 	// ---- frame timing (logged every 10 s while linked) ----------------------------------------
 
-	private static double lastFrame, statsSince, frameMax, frameSum, exportMax, leadSum, leadMax;
+	private static double lastFrame, statsSince, frameMax, frameSum, exportMax, leadSum, leadMax, speedMax;
 	private static int leadFrames;
 	private static int frames;
 
@@ -211,6 +223,8 @@ public final class Follow {
 			String.format("%.1f", frameMax * 1000), String.format("%.1f", exportMax * 1000),
 			mc.options.framerateLimit().get(), mc.options.enableVsync().get(), look.describe(), rawMouse.reports(),
 			String.format("%.2f", leadFrames == 0 ? 0 : leadSum / leadFrames), String.format("%.1f", leadMax));
+		LOG.info("Deadcraft: {}; top speed {} blocks/s", HeroRenderer.stats(), String.format("%.2f", speedMax));
+		speedMax = 0;
 		statsSince = now;
 		frameMax = frameSum = exportMax = leadSum = leadMax = 0;
 		leadFrames = 0;
@@ -352,6 +366,10 @@ public final class Follow {
 		if (ms != null) timeline.setDelay(ms / 1000.0);
 		return String.format("position delay %.0f ms behind Deadlock's newest sample (default %.0f).", timeline.delay() * 1000,
 			HeroTimeline.DELAY_S * 1000);
+	}
+
+	static String hero(String name) {
+		return HeroRenderer.command(name);
 	}
 
 	static String setOverlay(boolean on) {
