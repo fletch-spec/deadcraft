@@ -50,3 +50,6 @@ protocol/java/build/
 # Exported hero models (tools/hero-export) are Valve assets too
 *.glb
 *.gltf
+
+# Logs written by the client tests (fabric-client/logs) and runs
+logs/
