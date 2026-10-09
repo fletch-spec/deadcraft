@@ -36,19 +36,28 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
 	private bool _clientLinked;
+	private long _nextBridgeAttempt;
+	private string? _bridgeProblem;
 	private float _lastHull;
 	private uint _lastEntityFlags;
 
-	public override void OnLoad(bool isReload)
+	public override void OnLoad(bool isReload) => TryOpenBridge();
+
+	// A mapping held open by a Minecraft client on another protocol version can't be used; retry until
+	// that client closes (or restarts on a matching build) instead of needing a server restart.
+	private void TryOpenBridge()
 	{
+		_nextBridgeAttempt = Environment.TickCount64 + 2000;
 		try
 		{
 			_mapping = Mapping.OpenOrCreate();
 			Log($"bridge open: {Proto.MappingName}, protocol v{Proto.Version}");
+			_bridgeProblem = null;
 		}
 		catch (Exception e)
 		{
-			Log($"bridge disabled: {e.Message}");
+			if (e.Message != _bridgeProblem) Log($"bridge disabled, retrying every 2 s: {e.Message}");
+			_bridgeProblem = e.Message;
 		}
 	}
 
@@ -75,6 +84,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 
 	public override void OnGameFrame(bool simulating, bool firstTick, bool lastTick)
 	{
+		if (_mapping == null && Environment.TickCount64 >= _nextBridgeAttempt) TryOpenBridge();
 		if (_mapping == null) return;
 		_mapping.DeadlockHeartbeat();
 		if (Server.MapName != _cheatsMap)
