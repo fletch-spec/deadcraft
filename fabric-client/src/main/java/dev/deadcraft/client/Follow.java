@@ -150,7 +150,7 @@ public final class Follow {
 			double fx = -Math.sin(yawRad), fz = Math.cos(yawRad);  // Minecraft facing at this yaw
 			double forward = hv.x() * fx + hv.z() * fz, right = -(hv.x() * fz - hv.z() * fx);
 			HeroRenderer.setInput(new HeroAnimator.Input(forward, right, hv.y(), (hero.flags & HeroFlags.ON_GROUND) != 0,
-				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight));
+				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight, wallBeside(mc, player, fx, fz)));
 			speedMax = Math.max(speedMax, Math.hypot(forward, right));
 		}
 		Vec3 v = Proto.toMinecraft(hero.velocity);
@@ -223,6 +223,21 @@ public final class Follow {
 
 	static String lookHudLine() {
 		return rawLook ? look.hudLine() : "look: Deadlock's angles (raw mouse off)";
+	}
+
+	/**
+	 * In the air, a wall right beside the player (in front, to the left or to the right of the body),
+	 * from Minecraft's own blocks: Deadlock lets the hero bounce off it, and shows it bracing.
+	 */
+	private static HeroAnimator.Wall wallBeside(Minecraft mc, LocalPlayer player, double fx, double fz) {
+		if (player.onGround() || mc.level == null) return HeroAnimator.Wall.NONE;
+		var box = player.getBoundingBox().deflate(0.05, 0.1, 0.05);
+		double reach = 0.45;
+		// Facing (fx, fz); the body's right is (-fz, fx) in Minecraft's axes (south +z, east +x).
+		if (!mc.level.noCollision(player, box.move(fx * reach, 0, fz * reach))) return HeroAnimator.Wall.FORWARD;
+		if (!mc.level.noCollision(player, box.move(-fz * reach, 0, fx * reach))) return HeroAnimator.Wall.RIGHT;
+		if (!mc.level.noCollision(player, box.move(fz * reach, 0, -fx * reach))) return HeroAnimator.Wall.LEFT;
+		return HeroAnimator.Wall.NONE;
 	}
 
 	/** New entries in the plugin's ability ring since the last frame. */

@@ -51,7 +51,7 @@ public final class HeroRenderer {
 	private static String problem = "";
 	private static float[] skinned, skinnedNormals;
 	private static long lastNanos;
-	private static HeroAnimator.Input input = new HeroAnimator.Input(0, 0, 0, true, 0, 0);
+	private static HeroAnimator.Input input = new HeroAnimator.Input(0, 0, 0, true, 0, 0, HeroAnimator.Wall.NONE);
 	/** Standing still, the body stays put until the camera is this far round, then steps to face it. */
 	private static final float IDLE_TURN_START = 55f, IDLE_TURN_STOP = 5f;
 	private static boolean idleTurning;

@@ -44,6 +44,7 @@ internal static class HeroPack
 		("dash_ground", false), ("dash_air_forward", false), ("dash_air_back", false), ("dash_air_left", false), ("dash_air_right", false),
 		("run_to_stop_stand", false),
 		("mantle_32", false), ("mantle_64", false), ("mantle_96", false), ("mantle_128", false),
+		("wall_attach_forward", false), ("wall_attach_left", false), ("wall_attach_right", false),
 	];
 
 	public static void Write(string glbPath, string outPath, int targetTriangles)

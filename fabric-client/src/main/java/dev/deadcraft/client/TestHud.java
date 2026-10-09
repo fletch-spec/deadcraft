@@ -46,7 +46,9 @@ final class TestHud {
 		windowStart = nowMs;
 		lines.clear();
 		shown = String.format("%.0f fps  %.2f ms", frames / (frameSum / 1000), frameSum / Math.max(1, frames));
-		lines.add(String.format("%.0f fps  frame %.2f ms avg, %.1f ms worst", frames / (frameSum / 1000), frameSum / Math.max(1, frames), frameMax));
+		var level = Minecraft.getInstance().level;
+		lines.add(String.format("%.0f fps  frame %.2f ms avg, %.1f ms worst  weather %s", frames / (frameSum / 1000), frameSum / Math.max(1, frames), frameMax,
+			level == null ? "?" : level.isThundering() ? "thunder" : level.isRaining() ? "rain" : "clear"));
 		lines.add(String.format("deadlock sample age %.1f ms avg, %.1f max", ageSum / Math.max(1, ageSamples), ageMax));
 		lines.add(Follow.timelineHudLine());
 		lines.add(Follow.lookHudLine());

@@ -12,7 +12,10 @@ import java.util.Arrays;
  */
 public final class HeroAnimator {
 	/** One frame of what the hero is doing. Speeds in blocks per second, relative to facing. */
-	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight) {}
+	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall) {}
+
+	/** Which side of the body a wall is on, in the air (Deadlock can bounce off it), from Minecraft's blocks. */
+	public enum Wall { NONE, FORWARD, LEFT, RIGHT }
 
 	static final float FADE_S = 0.15f;
 	/** Speed at which the run clips play at normal rate, blocks/s. */
@@ -23,7 +26,9 @@ public final class HeroAnimator {
 	 * Deadlock's mantle is quicker than the clip, whose tail is a stand-up we never want (Deadlock often
 	 * hands straight into a slide). The climb plays sped up and ends early.
 	 */
-	static final float MANTLE_RATE = 1.4f, MANTLE_MAX_S = 0.6f;
+	static final float MANTLE_RATE = 1.4f, MANTLE_MAX_S = 0.8f;
+	/** A crouch (eye at crouch height) must hold this long: the eye dips for a tick as a slide ends. */
+	static final float CROUCH_ENTER_S = 0.06f;
 	/** Run/idle switching with a margin, so speeds near the line don't flicker between the two. */
 	static final double MOVE_START = 0.5, MOVE_STOP = 0.2;
 	/** Body turn speed (degrees/s) at which standing feet fully step. */
@@ -31,7 +36,7 @@ public final class HeroAnimator {
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
-	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, AIR_JUMP, FALL, SLIDE, DASH, MANTLE }
+	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, AIR_JUMP, FALL, SLIDE, DASH, MANTLE, WALL }
 
 	private final HeroModel model;
 	private State state = State.IDLE;
@@ -43,7 +48,8 @@ public final class HeroAnimator {
 	private final float[] pose;
 	private float standingEye, eye, slideEndedAt = -10, clock, turnRate, turnPhase, standingHull, hull;
 	/** How long the hero's state has said "sliding" (hull down, eye up); a tick's flicker isn't a slide. */
-	private float slideStateTime;
+	private float slideStateTime, crouchStateTime;
+	private Wall wallSide = Wall.NONE;
 	static final float SLIDE_ENTER_S = 0.03f;
 	private double speed;
 	private boolean grounded;
@@ -109,13 +115,17 @@ public final class HeroAnimator {
 		speed = Math.hypot(in.forward(), in.right());
 		boolean slideState = standingHull > 0 && hull < standingHull * 0.75f && eye >= standingEye * 0.9f;
 		slideStateTime = slideState ? slideStateTime + dt : 0;
-		boolean crouched = standingEye > 0 && in.eyeHeight() < standingEye * 0.8f;
+		boolean crouchState = standingEye > 0 && eye < standingEye * 0.8f;
+		crouchStateTime = crouchState ? crouchStateTime + dt : 0;
+		boolean wasCrouched = state == State.CROUCH_IDLE || state == State.CROUCH_RUN;
+		boolean crouched = crouchStateTime > 0 && (wasCrouched || crouchStateTime >= CROUCH_ENTER_S);
 		if (move != null && !moveContinues(in, speed)) {
 			if (move == State.SLIDE) slideEndedAt = clock;
 			move = null;
 		}
+		Wall wallBefore = wallSide;
 		State next = move != null ? move : choose(in, speed, crouched);
-		if (next != state) enter(next);
+		if (next != state || next == State.WALL && wallSide != wallBefore) enter(next);
 		stateTime += dt;
 		fade = Math.min(1, fade + dt / FADE_S);
 		if (state == State.RUN || state == State.CROUCH_RUN) {
@@ -136,8 +146,9 @@ public final class HeroAnimator {
 	private boolean moveContinues(Input in, double speed) {
 		return switch (move) {
 			case DASH -> stateTime < Math.min(DASH_MAX_S, clipDuration(dashClip));
-			// Ends as soon as Deadlock says what comes next: a slide, or standing on the ledge.
-			case MANTLE -> stateTime < MANTLE_MAX_S && slideStateTime < SLIDE_ENTER_S && !(in.grounded() && stateTime > 0.2f);
+			// Through the climb (Deadlock lowers the hull while climbing, so that says nothing yet); over
+			// on landing, into a slide or onto the ledge.
+			case MANTLE -> stateTime < MANTLE_MAX_S && !(in.grounded() && stateTime > 0.15f);
 			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f);
 			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded();
 			default -> false;
@@ -146,6 +157,10 @@ public final class HeroAnimator {
 
 	private State choose(Input in, double speed, boolean crouched) {
 		if (!in.grounded()) {
+			if (in.wall() != Wall.NONE && airTime > 0.15f) {
+				if (state != State.WALL || wallSide != in.wall()) wallSide = in.wall();
+				return State.WALL;
+			}
 			// Walked off an edge (no jump event): fall after a moment, so steps down don't flicker.
 			return airTime > 0.15f || state == State.FALL ? State.FALL : state;
 		}
@@ -169,6 +184,7 @@ public final class HeroAnimator {
 			case AIR_JUMP -> play("jump_air", stateTime);
 			case FALL -> play("in_air_loop_down", stateTime);
 			case MANTLE -> play("mantle_64", stateTime * MANTLE_RATE);
+			case WALL -> play("wall_attach_" + wallSide.name().toLowerCase(), stateTime);
 			case DASH -> play(dashClip, stateTime);
 			case SLIDE -> {
 				float start = clipDuration("slide_start");
