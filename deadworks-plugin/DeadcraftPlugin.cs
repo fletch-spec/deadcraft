@@ -42,7 +42,11 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private float _lastHull;
 	private uint _lastEntityFlags;
 
-	public override void OnLoad(bool isReload) => TryOpenBridge();
+	public override void OnLoad(bool isReload)
+	{
+		DeadlockFrameCap.Register();
+		TryOpenBridge();
+	}
 
 	// A mapping held open by a Minecraft client on another protocol version can't be used; retry until
 	// that client closes (or restarts on a matching build) instead of needing a server restart.
@@ -71,18 +75,11 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		if (Server.MapName != VoidMap || pawn.IsBot || pawn.Controller == null) return;
 		Server.ExecuteCommand("sv_cheats 1");
 		Server.ClientCommand(pawn.Controller.Slot, "mat_fullbright 1");
-		int original = DeadlockFrameCap.Original();
-		Server.ClientCommand(pawn.Controller.Slot, $"fps_max {DeadlockFrameCap.WhilePlaying}");
-		Log($"mat_fullbright 1 and fps_max {DeadlockFrameCap.WhilePlaying} sent to slot {pawn.Controller.Slot} (their own fps_max {original} is restored on disconnect)");
-	}
-
-	// Put the player's own frame cap back as they leave (see DeadlockFrameCap).
-	public override void OnClientDisconnecting(ClientDisconnectedEvent e)
-	{
-		if (Server.MapName != VoidMap) return;
-		int original = DeadlockFrameCap.Original();
-		Server.ClientCommand(e.Slot, $"fps_max {original}");
-		Log($"fps_max {original} sent back to slot {e.Slot} as it disconnects");
+		int cap = DeadlockFrameCap.WhilePlaying();
+		int original = DeadlockFrameCap.Original(out string? problem);
+		Server.ClientCommand(pawn.Controller.Slot, $"fps_max {cap}");
+		Log($"mat_fullbright 1 and fps_max {cap} sent to slot {pawn.Controller.Slot}; their own fps_max is {original}"
+			+ (problem == null ? "" : $" (couldn't read it: {problem})"));
 	}
 
 	public override void OnUnload()
