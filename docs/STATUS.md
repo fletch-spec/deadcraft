@@ -16,6 +16,8 @@ Reports: [feasibility](feasibility.md), [collider test](collider-test.md), [feel
 
 ## How to run it (desktop)
 
+Shortcuts: `.\tools\make-shortcuts.ps1` puts "Deadcraft 1 - Server", "2 - Deadlock" (connects on start; Deadlock must be closed first) and "3 - Minecraft" on the desktop. The plugin sends `mat_fullbright 1` when your hero spawns on the void map. By hand:
+
 1. `.\tools\run-server.ps1 -Map deadcraft_void` (add `-LogFile <path>` to capture the console when diagnosing crashes; the file grows fast).
 2. Deadlock in **Borderless Window**: console `connect localhost:27067`, pick Celeste, `mat_fullbright 1`.
 3. `fabric-client\gradlew -p fabric-client runClient`, load the creative superflat world, `/deadcraft off` then `/deadcraft on`.
