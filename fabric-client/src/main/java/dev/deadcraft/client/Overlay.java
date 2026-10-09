@@ -15,6 +15,7 @@ import java.lang.invoke.MethodHandle;
 import java.nio.charset.StandardCharsets;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.ChatScreen;
+import net.minecraft.client.gui.screens.PauseScreen;
 
 /**
  * Overlay mode: Minecraft's window sits exactly over Deadlock's, borderless, always on top, click-through
@@ -22,13 +23,14 @@ import net.minecraft.client.gui.screens.ChatScreen;
  * never touched: this only moves and restyles Minecraft's own window (user32 through the Foreign
  * Function API).
  *
- * <p>F6 hands input to Minecraft and opens chat; when Minecraft's screen closes, input goes back to
+ * <p>F6 hands input to Minecraft and opens chat, Esc opens its pause menu (Quit is there); when
+ * Minecraft's screen closes, input goes back to
  * Deadlock. Screens Minecraft opens itself (death) also hand it input. Deadlock must run in a window or
  * borderless window: nothing can be drawn over exclusive fullscreen.
  */
 final class Overlay {
 	private static final String DEADLOCK_TITLE = "Deadlock";
-	private static final int VK_F6 = 0x75;
+	private static final int VK_F6 = 0x75, VK_ESCAPE = 0x1B;
 
 	private static final int GWL_STYLE = -16, GWL_EXSTYLE = -20;
 	private static final long WS_POPUP = 0x80000000L, WS_VISIBLE = 0x10000000L, WS_OVERLAPPEDWINDOW = 0x00CF0000L;
@@ -75,7 +77,10 @@ final class Overlay {
 	private boolean enabled = true;
 	private boolean applied;
 	private boolean interactive;
-	private boolean f6WasDown;
+	private boolean f6WasDown, escWasDown;
+	/** Esc opened Deadlock's menu behind ours; the next Esc closes that, so it mustn't reopen ours. */
+	private boolean deadlockMenuOpen;
+	private boolean pauseOpen;
 	private MemorySegment mcWindow = MemorySegment.NULL;
 	private MemorySegment deadlockWindow = MemorySegment.NULL;
 	private long savedStyle, savedExStyle;
@@ -107,13 +112,27 @@ final class Overlay {
 			boolean f6Down = ((short) GET_ASYNC_KEY_STATE.invoke(VK_F6) & 0x8000) != 0;
 			boolean f6Pressed = f6Down && !f6WasDown;
 			f6WasDown = f6Down;
+			boolean escDown = ((short) GET_ASYNC_KEY_STATE.invoke(VK_ESCAPE) & 0x8000) != 0;
+			boolean escPressed = escDown && !escWasDown;
+			escWasDown = escDown;
 			boolean screenOpen = mc.gui.screen() != null;
-			if (!interactive && (f6Pressed || screenOpen)) {
+			if (!interactive && escPressed && !screenOpen) {
+				if (deadlockMenuOpen) {
+					deadlockMenuOpen = false;  // this Esc closed Deadlock's menu
+				} else {
+					// Esc reaches Deadlock too (its own menu opens behind); Minecraft's pause menu has Quit.
+					setInteractive(true);
+					mc.gui.setScreen(new PauseScreen(true));
+					pauseOpen = true;
+				}
+			} else if (!interactive && (f6Pressed || screenOpen)) {
 				setInteractive(true);
 				if (!screenOpen) mc.gui.setScreen(new ChatScreen("", false));
 			} else if (interactive && (!screenOpen || f6Pressed)) {
 				if (screenOpen) mc.gui.setScreen(null);
 				setInteractive(false);
+				if (pauseOpen) deadlockMenuOpen = true;
+				pauseOpen = false;
 			}
 
 			long now = System.nanoTime();
