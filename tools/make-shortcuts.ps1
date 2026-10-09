@@ -17,6 +17,9 @@ $repo = Split-Path $PSScriptRoot -Parent
 $desktop = [Environment]::GetFolderPath('Desktop')
 $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -Name SteamExe).SteamExe -replace '/', '\'
 $deadlockAppId = 1422450
+# Deadlock's own icon when it's in Steam's main library, otherwise Steam's
+$deadlockExe = Join-Path (Split-Path $steam) 'steamapps\common\Deadlock\game\bin\win64\deadlock.exe'
+$deadlockIcon = if (Test-Path $deadlockExe) { "$deadlockExe,0" } else { $steam }
 $shell = New-Object -ComObject WScript.Shell
 # Shortcuts from earlier versions of this script
 'Deadcraft 1 - Server', 'Deadcraft 2 - Deadlock', 'Deadcraft 3 - Minecraft' |
@@ -33,9 +36,9 @@ function New-Shortcut($name, $target, $arguments, $workDir, $icon) {
 }
 
 New-Shortcut 'Deadcraft 1 - Start the movement server' "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-	"-NoExit -ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void" $repo $null
+	"-NoExit -ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void" $repo "$repo\tools\icons\server-block.ico,0"
 New-Shortcut 'Deadcraft 2 - Join with your hero' $steam `
-	"-applaunch $deadlockAppId -console +fps_max $DeadlockFps +connect localhost:27067" (Split-Path $steam) $steam
+	"-applaunch $deadlockAppId -console +fps_max $DeadlockFps +connect localhost:27067" (Split-Path $steam) $deadlockIcon
 # The window closes with Minecraft, or stays open to show the error if the build or game fails.
 # cmd /c strips the outermost pair of quotes, so the whole command line is wrapped in one more pair.
 New-Shortcut 'Deadcraft 3 - Show the Minecraft world' "$env:SystemRoot\System32\cmd.exe" `
