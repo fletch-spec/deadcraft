@@ -80,6 +80,9 @@ public final class HeroAnimator {
 	}
 
 	private void enter(State next) {
+		HeroRenderer.LOG.info("Deadcraft: anim {} -> {} after {} s (speed {} b/s, {}, eye {}, hull {})", state, next,
+			String.format("%.2f", stateTime), String.format("%.1f", speed), grounded ? "ground" : "air", String.format("%.0f", eye),
+			String.format("%.0f", hull));
 		previousPose = pose.clone();
 		state = next;
 		stateTime = 0;

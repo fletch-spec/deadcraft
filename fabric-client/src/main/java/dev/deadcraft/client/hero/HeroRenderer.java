@@ -33,9 +33,12 @@ public final class HeroRenderer {
 	private static final float BLOCKS_PER_METRE = 1f / 0.0254f / Proto.UNITS_PER_BLOCK;
 	/** Extra size on top of Deadlock's scale (1 = the hero's true size against Minecraft's blocks). */
 	private static float scale = 1.2f;  // chosen by eye 2026-10-10
-	/** The drawn body's yaw eases after the camera's instead of snapping with every mouse movement. */
-	private static final float BODY_EASE_S = 0.1f;
-	private static float bodyYaw = Float.NaN;
+	/**
+	 * The drawn body's yaw follows the camera's on a critically damped spring: it eases in instead of
+	 * jumping to full speed, and settles without a long tail. Settling times, seconds.
+	 */
+	private static final float BODY_SETTLE_MOVING_S = 0.12f, BODY_SETTLE_STILL_S = 0.3f;
+	private static float bodyYaw = Float.NaN, bodyYawSpeed;
 
 	private static String hero = "unicorn";
 	private static boolean enabled = true;
@@ -136,10 +139,21 @@ public final class HeroRenderer {
 		boolean still = Math.hypot(input.forward(), input.right()) < 0.3 && input.grounded();
 		if (!still) idleTurning = true;
 		else if (Math.abs(diff) > IDLE_TURN_START) idleTurning = true;
-		else if (Math.abs(diff) < IDLE_TURN_STOP) idleTurning = false;
-		float step = idleTurning ? diff * (1 - (float) Math.exp(-dt / (still ? BODY_EASE_S * 2.5f : BODY_EASE_S))) : 0;
-		bodyYaw += step;
-		animator.setTurnRate(dt > 0 ? step / dt : 0);
+		else if (Math.abs(diff) < IDLE_TURN_STOP && Math.abs(bodyYawSpeed) < 30) idleTurning = false;
+		if (idleTurning && dt > 0) {
+			float omega = 2f / (still ? BODY_SETTLE_STILL_S : BODY_SETTLE_MOVING_S) * 2.2f;  // ~settled after the settling time
+			// Semi-implicit Euler, sub-stepped so long frames stay stable.
+			int steps = Math.max(1, (int) Math.ceil(dt / 0.004f));
+			float h = dt / steps;
+			for (int i = 0; i < steps; i++) {
+				float d = ((target - bodyYaw) % 360 + 540) % 360 - 180;
+				bodyYawSpeed += (omega * omega * d - 2 * omega * bodyYawSpeed) * h;
+				bodyYaw += bodyYawSpeed * h;
+			}
+		} else {
+			bodyYawSpeed = 0;
+		}
+		animator.setTurnRate(bodyYawSpeed);
 		float[] matrices = animator.update(input, dt);
 		skin(matrices);
 		skinNanos += System.nanoTime() - t0;
