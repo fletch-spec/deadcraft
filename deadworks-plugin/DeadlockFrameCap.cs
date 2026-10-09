@@ -40,7 +40,7 @@ internal static class DeadlockFrameCap
 	// Steam\userdata\<account>\1422450\local\cfg\machine_convars.vcfg: "fps_max"  "400"
 	private static int? ReadConfig()
 	{
-		// From the server, SteamsteamappsmmonDeadlockgamebinwin64deadworks.exe (AppContext.BaseDirectory is empty here).
+		// The server is Steam\steamapps\common\Deadlock\game\bin\win64\deadworks.exe (AppContext.BaseDirectory is empty here).
 		var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
 		if (exe == null) return null;
 		var dir = new DirectoryInfo(Path.GetDirectoryName(exe)!);
