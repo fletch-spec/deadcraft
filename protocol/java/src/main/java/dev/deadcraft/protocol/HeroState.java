@@ -23,6 +23,8 @@ public final class HeroState {
 	public static final int ABILITY_EVENT_SERIAL_AT = 0x58;
 	public static final int RECENTER_SERIAL_AT = 0x5C;
 	public static final int RECENTER_DELTA_AT = 0x60;
+	public static final int HULL_HEIGHT_AT = 0x6C;
+	public static final int ENTITY_FLAGS_AT = 0x70;
 
 	public int seq;  // unsigned
 	public int flags;  // HeroFlags
@@ -40,6 +42,8 @@ public final class HeroState {
 	public int abilityEventSerial;  // serial of the newest AbilityEvent
 	public int recenterSerial;  // bumps each time the plugin recentres
 	public Vec3 recenterDelta = Vec3.ZERO;  // Source units the hero and every collider moved in the latest recentre
+	public float hullHeight;  // collision box height, Source units (shrinks when crouching or sliding)
+	public int entityFlags;  // the engine's entity flag bits (on ground, ducking, ...)
 
 	/** Decode from a little-endian buffer; {@code at} is where this struct starts. */
 	public static HeroState read(ByteBuffer b, int at) {
@@ -60,6 +64,8 @@ public final class HeroState {
 		v.abilityEventSerial = b.getInt(at + ABILITY_EVENT_SERIAL_AT);
 		v.recenterSerial = b.getInt(at + RECENTER_SERIAL_AT);
 		v.recenterDelta = new Vec3(b.getFloat(at + RECENTER_DELTA_AT), b.getFloat(at + RECENTER_DELTA_AT + 4), b.getFloat(at + RECENTER_DELTA_AT + 8));
+		v.hullHeight = b.getFloat(at + HULL_HEIGHT_AT);
+		v.entityFlags = b.getInt(at + ENTITY_FLAGS_AT);
 		return v;
 	}
 
@@ -81,6 +87,8 @@ public final class HeroState {
 		b.putInt(at + ABILITY_EVENT_SERIAL_AT, abilityEventSerial);
 		b.putInt(at + RECENTER_SERIAL_AT, recenterSerial);
 		b.putFloat(at + RECENTER_DELTA_AT, recenterDelta.x()).putFloat(at + RECENTER_DELTA_AT + 4, recenterDelta.y()).putFloat(at + RECENTER_DELTA_AT + 8, recenterDelta.z());
+		b.putFloat(at + HULL_HEIGHT_AT, hullHeight);
+		b.putInt(at + ENTITY_FLAGS_AT, entityFlags);
 	}
 
 	@Override
@@ -101,16 +109,18 @@ public final class HeroState {
 			&& healthMax == v.healthMax
 			&& abilityEventSerial == v.abilityEventSerial
 			&& recenterSerial == v.recenterSerial
-			&& recenterDelta.equals(v.recenterDelta);
+			&& recenterDelta.equals(v.recenterDelta)
+			&& Float.compare(hullHeight, v.hullHeight) == 0
+			&& entityFlags == v.entityFlags;
 	}
 
 	@Override
 	public int hashCode() {
-		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial, recenterSerial, recenterDelta);
+		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial, recenterSerial, recenterDelta, hullHeight, entityFlags);
 	}
 
 	@Override
 	public String toString() {
-		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + ", " + "recenterSerial=" + recenterSerial + ", " + "recenterDelta=" + recenterDelta + "]";
+		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + ", " + "recenterSerial=" + recenterSerial + ", " + "recenterDelta=" + recenterDelta + ", " + "hullHeight=" + hullHeight + ", " + "entityFlags=" + entityFlags + "]";
 	}
 }

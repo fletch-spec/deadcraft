@@ -12,7 +12,7 @@
 
 [protocol]
 magic = 0x54464344          # bytes "DCFT"
-version = 3
+version = 4
 mapping_name = 'Local\Deadcraft'
 mapping_size = 262144
 units_per_block = 64.0      # Source units per Minecraft block (docs/collider-test.md)
@@ -64,6 +64,8 @@ fields = [
   { name = "ability_event_serial", type = "u32", offset = 0x58, doc = "serial of the newest AbilityEvent" },
   { name = "recenter_serial", type = "u32", offset = 0x5C, doc = "bumps each time the plugin recentres" },
   { name = "recenter_delta", type = "vec3", offset = 0x60, doc = "Source units the hero and every collider moved in the latest recentre" },
+  { name = "hull_height", type = "f32", offset = 0x6C, doc = "collision box height, Source units (shrinks when crouching or sliding)" },
+  { name = "entity_flags", type = "u32", offset = 0x70, doc = "the engine's entity flag bits (on ground, ducking, ...)" },
 ]
 
 [[flags]]

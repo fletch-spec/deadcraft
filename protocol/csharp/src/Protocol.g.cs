@@ -10,7 +10,7 @@ namespace Deadcraft.Protocol;
 public static partial class Proto
 {
 	public const uint Magic = 0x54464344;
-	public const uint Version = 3;
+	public const uint Version = 4;
 	public const string MappingName = @"Local\Deadcraft";
 	public const int MappingSize = 262144;
 	public const float UnitsPerBlock = 64.0f;
@@ -140,6 +140,8 @@ public struct HeroState
 	public const int AbilityEventSerialAt = 0x58;
 	public const int RecenterSerialAt = 0x5C;
 	public const int RecenterDeltaAt = 0x60;
+	public const int HullHeightAt = 0x6C;
+	public const int EntityFlagsAt = 0x70;
 
 	public uint Seq;
 	public uint Flags; // HeroFlags
@@ -157,6 +159,8 @@ public struct HeroState
 	public uint AbilityEventSerial; // serial of the newest AbilityEvent
 	public uint RecenterSerial; // bumps each time the plugin recentres
 	public Vector3 RecenterDelta; // Source units the hero and every collider moved in the latest recentre
+	public float HullHeight; // collision box height, Source units (shrinks when crouching or sliding)
+	public uint EntityFlags; // the engine's entity flag bits (on ground, ducking, ...)
 
 	public HeroState() { }
 
@@ -179,6 +183,8 @@ public struct HeroState
 		AbilityEventSerial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(AbilityEventSerialAt)),
 		RecenterSerial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(RecenterSerialAt)),
 		RecenterDelta = new Vector3(Proto.ReadSingle(s, RecenterDeltaAt), Proto.ReadSingle(s, RecenterDeltaAt + 4), Proto.ReadSingle(s, RecenterDeltaAt + 8)),
+		HullHeight = Proto.ReadSingle(s, HullHeightAt),
+		EntityFlags = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(EntityFlagsAt)),
 	};
 
 	/// <summary>Encode into a span that starts at this struct.</summary>
@@ -200,6 +206,8 @@ public struct HeroState
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(AbilityEventSerialAt), AbilityEventSerial);
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(RecenterSerialAt), RecenterSerial);
 		Proto.WriteSingle(s, RecenterDeltaAt, RecenterDelta.X); Proto.WriteSingle(s, RecenterDeltaAt + 4, RecenterDelta.Y); Proto.WriteSingle(s, RecenterDeltaAt + 8, RecenterDelta.Z);
+		Proto.WriteSingle(s, HullHeightAt, HullHeight);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(EntityFlagsAt), EntityFlags);
 	}
 }
 

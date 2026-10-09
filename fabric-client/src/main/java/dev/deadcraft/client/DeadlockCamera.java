@@ -12,7 +12,7 @@ import net.minecraft.client.Minecraft;
  */
 public final class DeadlockCamera {
 	private static boolean enabled = true;
-	private static float distance = 180f, right = 40f, up = 15f;  // tuned by eye 2026-10-09
+	private static float distance = 150f, right = 40f, up = 15f;  // tuned by eye with the hero model, 2026-10-10
 	/** Deadlock's eye height above the feet, from the hero state (86 units for Celeste). */
 	private static float eyeHeight = 86f;
 	private static CameraType savedType;

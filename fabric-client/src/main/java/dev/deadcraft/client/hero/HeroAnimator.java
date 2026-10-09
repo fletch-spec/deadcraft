@@ -11,7 +11,7 @@ import java.util.Arrays;
  */
 public final class HeroAnimator {
 	/** One frame of what the hero is doing. Speeds in blocks per second, relative to facing. */
-	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight) {}
+	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight) {}
 
 	static final float FADE_S = 0.15f;
 	/** Speed at which the run clips play at normal rate, blocks/s. */
@@ -33,7 +33,9 @@ public final class HeroAnimator {
 	private float runPhase;  // 0..1, shared by every direction so blends stay in step
 	private float[] previousPose;
 	private final float[] pose;
-	private float standingEye, eye, slideLowestEye, slideEndedAt = -10, clock, turnRate, turnPhase;
+	private float standingEye, eye, slideEndedAt = -10, clock, turnRate, turnPhase, standingHull, hull;
+	/** Whether this slide lowered the hull: then the hull says when it ends; otherwise the speed does. */
+	private boolean slideHullLow;
 	private double speed;
 	private boolean grounded;
 	private String dashClip = "dash_ground", clipA = "", clipB = "";
@@ -64,13 +66,9 @@ public final class HeroAnimator {
 			dashClip = in.grounded() ? "dash_ground" : "dash_air_" + airDirection(in);
 			start(State.DASH);
 		} else if (n.contains("slide")) {
-			// Deadlock reports the slide again when it ends: a slide event during a slide (or just after
-			// one ended on its own) ends it rather than starting another.
-			if (move == State.SLIDE) {
-				move = null;
-				slideEndedAt = clock;
-			} else if (clock - slideEndedAt > 0.4f) {
-				slideLowestEye = in.eyeHeight();
+			// The slide ability fires on every crouch press; it's a slide only when moving fast.
+			if (move != State.SLIDE && in.grounded() && Math.hypot(in.forward(), in.right()) > runSpeed * 0.6) {
+				slideHullLow = false;
 				start(State.SLIDE);
 			}
 		} else if (n.contains("mantle")) {
@@ -96,12 +94,14 @@ public final class HeroAnimator {
 	public float[] update(Input in, float dt) {
 		standingEye = Math.max(standingEye, in.eyeHeight());
 		eye = in.eyeHeight();
+		hull = in.hullHeight();
+		standingHull = Math.max(standingHull, hull);
 		clock += dt;
 		turnPhase = (turnPhase + dt * Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 1.5f) % 1f;
 		grounded = in.grounded();
 		airTime = in.grounded() ? 0 : airTime + dt;
 		speed = Math.hypot(in.forward(), in.right());
-		if (state == State.SLIDE) slideLowestEye = Math.min(slideLowestEye, eye);
+		if (state == State.SLIDE && hull < standingHull * 0.85f) slideHullLow = true;
 		boolean crouched = standingEye > 0 && in.eyeHeight() < standingEye * 0.8f;
 		if (move != null && !moveContinues(in, speed)) {
 			if (move == State.SLIDE) slideEndedAt = clock;
@@ -130,10 +130,10 @@ public final class HeroAnimator {
 		return switch (move) {
 			case DASH -> stateTime < Math.min(DASH_MAX_S, clipDuration(dashClip));
 			case MANTLE -> stateTime < clipDuration("mantle_64");
-			// A slide lasts while the hero keeps sliding along the ground, and ends as soon as Deadlock
-			// stands the hero back up (the eye rises back to standing height after dipping).
-			case SLIDE -> stateTime < 0.2f || in.grounded() && speed > runSpeed * 0.4 && stateTime < 4f
-				&& !(slideLowestEye < standingEye * 0.9f && in.eyeHeight() > standingEye * 0.95f);
+			// A slide ends when Deadlock stands the hero up (hull back to full height), drops it into a
+			// crouch (eye at crouch height), or it leaves the ground; without a hull change, when it slows.
+			case SLIDE -> stateTime < 0.15f || in.grounded() && stateTime < 4f && in.eyeHeight() > standingEye * 0.8f
+				&& (slideHullLow ? hull < standingHull * 0.9f : speed > runSpeed * 0.9);
 			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f);
 			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded();
 			default -> false;
@@ -222,8 +222,8 @@ public final class HeroAnimator {
 
 	/** For the test HUD. */
 	public String hudLine() {
-		return String.format("anim: %s%s  speed %.1f b/s  %s  eye %.0f/%.0f", state, state == State.DASH ? " " + dashClip : "", speed,
-			grounded ? "ground" : "air", eye, standingEye);
+		return String.format("anim: %s%s  speed %.1f b/s  %s  eye %.0f/%.0f  hull %.0f/%.0f", state, state == State.DASH ? " " + dashClip : "", speed,
+			grounded ? "ground" : "air", eye, standingEye, hull, standingHull);
 	}
 
 	public String describe() {

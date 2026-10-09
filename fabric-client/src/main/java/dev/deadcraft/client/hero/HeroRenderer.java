@@ -46,7 +46,10 @@ public final class HeroRenderer {
 	private static String problem = "";
 	private static float[] skinned, skinnedNormals;
 	private static long lastNanos;
-	private static HeroAnimator.Input input = new HeroAnimator.Input(0, 0, 0, true, 0);
+	private static HeroAnimator.Input input = new HeroAnimator.Input(0, 0, 0, true, 0, 0);
+	/** Standing still, the body stays put until the camera is this far round, then steps to face it. */
+	private static final float IDLE_TURN_START = 55f, IDLE_TURN_STOP = 5f;
+	private static boolean idleTurning;
 
 	private HeroRenderer() {}
 
@@ -130,7 +133,11 @@ public final class HeroRenderer {
 		float target = state.bodyRot;
 		if (Float.isNaN(bodyYaw) || dt <= 0) bodyYaw = target;
 		float diff = ((target - bodyYaw) % 360 + 540) % 360 - 180;
-		float step = diff * (1 - (float) Math.exp(-dt / BODY_EASE_S));
+		boolean still = Math.hypot(input.forward(), input.right()) < 0.3 && input.grounded();
+		if (!still) idleTurning = true;
+		else if (Math.abs(diff) > IDLE_TURN_START) idleTurning = true;
+		else if (Math.abs(diff) < IDLE_TURN_STOP) idleTurning = false;
+		float step = idleTurning ? diff * (1 - (float) Math.exp(-dt / (still ? BODY_EASE_S * 2 : BODY_EASE_S))) : 0;
 		bodyYaw += step;
 		animator.setTurnRate(dt > 0 ? step / dt : 0);
 		float[] matrices = animator.update(input, dt);

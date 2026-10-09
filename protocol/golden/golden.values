@@ -26,6 +26,8 @@ HeroState.health_max = 822
 HeroState.ability_event_serial = 2
 HeroState.recenter_serial = 4
 HeroState.recenter_delta = 1440.0, -1440.0, 5743.5
+HeroState.hull_height = 52.5
+HeroState.entity_flags = 3
 
 AbilityEvents[0].serial = 1
 AbilityEvents[0].kind = 1

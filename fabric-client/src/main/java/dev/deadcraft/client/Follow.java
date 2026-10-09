@@ -150,7 +150,7 @@ public final class Follow {
 			double fx = -Math.sin(yawRad), fz = Math.cos(yawRad);  // Minecraft facing at this yaw
 			double forward = hv.x() * fx + hv.z() * fz, right = -(hv.x() * fz - hv.z() * fx);
 			HeroRenderer.setInput(new HeroAnimator.Input(forward, right, hv.y(), (hero.flags & HeroFlags.ON_GROUND) != 0,
-				(float) (hero.eyePosition.z() - hero.position.z())));
+				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight));
 			speedMax = Math.max(speedMax, Math.hypot(forward, right));
 		}
 		Vec3 v = Proto.toMinecraft(hero.velocity);

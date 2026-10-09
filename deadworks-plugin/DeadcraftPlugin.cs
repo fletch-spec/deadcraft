@@ -36,6 +36,8 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
 	private bool _clientLinked;
+	private float _lastHull;
+	private uint _lastEntityFlags;
 
 	public override void OnLoad(bool isReload)
 	{
@@ -112,6 +114,15 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			state.StaminaMax = stamina.MaxValue;
 			state.Health = hero.Health;
 			state.HealthMax = hero.GetMaxHealth();
+			state.HullHeight = hero.Collision.Maxs.Z - hero.Collision.Mins.Z;
+			state.EntityFlags = (uint)hero.Flags;
+			if (state.HullHeight != _lastHull || state.EntityFlags != _lastEntityFlags)
+			{
+				// Learning what slides and crouches look like from here (no flag for either in Deadworks).
+				Log($"hull {state.HullHeight:F1} entity flags 0x{state.EntityFlags:X} eye {hero.EyePosition.Z - hero.Position.Z:F0} speed {new Vector2(hero.AbsVelocity.X, hero.AbsVelocity.Y).Length():F0}");
+				_lastHull = state.HullHeight;
+				_lastEntityFlags = state.EntityFlags;
+			}
 		}
 		state.RecenterSerial = _recenterSerial;
 		state.RecenterDelta = _recenterDelta;
