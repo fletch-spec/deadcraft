@@ -55,6 +55,11 @@ public final class HeroRenderer {
 		input = in;
 	}
 
+	/** A Deadlock ability was used: movement abilities start animation moves. */
+	public static void ability(String name) {
+		if (animator != null) animator.ability(name, input);
+	}
+
 	/** True when this player should be drawn as the hero (the pack loaded). */
 	public static boolean ready() {
 		if (!enabled) return false;

@@ -43,6 +43,7 @@ internal static class HeroPack
 		("slide_start", false), ("slide_loop", true), ("slide_getup", false),
 		("dash_ground", false), ("dash_air_forward", false), ("dash_air_back", false), ("dash_air_left", false), ("dash_air_right", false),
 		("run_to_stop_stand", false),
+		("mantle_32", false), ("mantle_64", false), ("mantle_96", false), ("mantle_128", false),
 	];
 
 	public static void Write(string glbPath, string outPath, int targetTriangles)
@@ -144,7 +145,13 @@ internal static class HeroPack
 		}
 
 		// ---- animations: skinning matrices per packed joint, sampled at Fps ----
+		// Clips carry their own travel on the root_motion joint (a dash moves the body forward). The real
+		// movement comes from Deadlock, so every frame is moved back by root_motion's travel.
 		var tracks = instance.Armature.AnimationTracks;
+		var rootNode = instance.Armature.LogicalNodes.FirstOrDefault(n => n.Name == "root_motion");
+		instance.Armature.SetPoseTransforms();
+		var rootRest = rootNode?.ModelMatrix ?? Matrix4x4.Identity;
+		Console.WriteLine(rootNode == null ? "pack: no root_motion joint; clips keep their travel" : "pack: removing root motion");
 		var clipData = new List<(string Name, bool Loop, int Frames, float[] Matrices)>();
 		foreach (var (clipName, loop) in Clips)
 		{
@@ -163,10 +170,17 @@ internal static class HeroPack
 			{
 				instance.Armature.SetAnimationFrame(track, Math.Min(duration, f / Fps), loop);
 				var posed = instance.ToArray();  // enumerating refreshes the drawables' transforms
+				var cancel = Matrix4x4.Identity;
+				if (rootNode != null)
+				{
+					// Travel only; the root's turn stays (Deadlock supplies every position change, mantles included).
+					var travel = rootNode.ModelMatrix.Translation - rootRest.Translation;
+					cancel = Matrix4x4.CreateTranslation(-travel);
+				}
 				foreach (var ((d, j), id) in jointIds)
 				{
 					var skin = (SkinnedTransform)posed[d].Transform;
-					var x = skin.SkinMatrices[j];
+					var x = skin.SkinMatrices[j] * cancel;  // row vectors: skin first, then the correction
 					int o = (f * jointIds.Count + id) * 12;
 					// System.Numerics is row-vector (v * M): rows of the 3x4 are M's columns.
 					m[o] = x.M11; m[o + 1] = x.M21; m[o + 2] = x.M31; m[o + 3] = x.M41;

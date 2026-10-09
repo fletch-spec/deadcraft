@@ -54,6 +54,8 @@ public final class Follow {
 	private static final LookPredictor look = new LookPredictor(rawMouse);
 	private static boolean rawLook = true;
 	private static long lastLookTick = -1;
+	private static int lastAbilitySerial = -1;
+	private static final java.util.Set<String> abilitiesSeen = new java.util.HashSet<>();
 	private static boolean savedBobView;
 	private static long lastGoodRead;
 
@@ -138,6 +140,7 @@ public final class Follow {
 		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
 
 		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z());
+		readAbilities(hero);
 		{
 			// Hero model animation: velocity relative to where the body faces.
 			Vec3 hv = Proto.toMinecraft(hero.velocity);
@@ -200,6 +203,23 @@ public final class Follow {
 			player.yBob = player.yBobO = yaw;
 		}
 		frameStats(mc, localNow);
+	}
+
+	/** New entries in the plugin's ability ring since the last frame. */
+	private static void readAbilities(HeroState hero) {
+		int newest = hero.abilityEventSerial;
+		if (lastAbilitySerial < 0 || Integer.compareUnsigned(newest, lastAbilitySerial) < 0 || newest - lastAbilitySerial > 64) {
+			lastAbilitySerial = newest;  // first frame, plugin restart, or a long gap: start from now
+			return;
+		}
+		for (int serial = lastAbilitySerial + 1; Integer.compareUnsigned(serial, newest) <= 0; serial++) {
+			mapping.readAbilityEvent(serial).ifPresent(e -> {
+				if (abilitiesSeen.add(e.abilityName)) LOG.info("Deadcraft: ability event {}", e.abilityName);
+				HeroRenderer.ability(e.abilityName);
+				if (e.abilityName.toLowerCase().contains("dash")) DeadlockCamera.dashKick();
+			});
+		}
+		lastAbilitySerial = newest;
 	}
 
 	// ---- frame timing (logged every 10 s while linked) ----------------------------------------
@@ -309,6 +329,7 @@ public final class Follow {
 			DeadlockCamera.onLink(mc, true);
 			look.clear();
 			lastLookTick = -1;
+			lastAbilitySerial = -1;
 			if (rawLook) rawMouse.start();
 			lastProblem = "";
 			status(mc, "Deadcraft: following the Deadlock hero");

@@ -3,37 +3,35 @@ package dev.deadcraft.client.hero;
 import java.util.Arrays;
 
 /**
- * Picks and blends the hero's clips from what Deadlock reports about the hero, standing in for
- * Deadlock's own animation graph: idle, eight-way run (crouched or not) with the play rate following
- * the speed, jump and fall, slide, and dash. A new state fades in over {@link #FADE_S}.
- *
- * <p>Deadlock doesn't send slide or dash flags, so they are read from the motion: crouched (eye
- * height well below standing) and fast is a slide; a burst well above run speed is a dash.
+ * Picks and blends the hero's clips, standing in for Deadlock's own animation graph. Continuous
+ * states come from the hero's motion: idle, eight-way run (crouched or not) with the play rate
+ * following the speed, and fall. One-shot moves come from Deadlock's movement ability events (dash,
+ * slide, mantle, jump and air jump), which say exactly when they start. A new state fades in over
+ * {@link #FADE_S}.
  */
 public final class HeroAnimator {
-	/** One frame of what the hero is doing. Speeds in blocks per second. */
+	/** One frame of what the hero is doing. Speeds in blocks per second, relative to facing. */
 	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight) {}
 
 	static final float FADE_S = 0.15f;
-	/** Celeste's run speed, blocks/s; the run clips play at normal rate here. Tuned from the log. */
-	static float runSpeed = 4.2f;
-	static float dashFactor = 1.6f;
-	static float slideFactor = 1.1f;
+	/** Speed at which the run clips play at normal rate, blocks/s. */
+	static float runSpeed = 5f;
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
-	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, FALL, SLIDE, DASH }
+	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, AIR_JUMP, FALL, SLIDE, DASH, MANTLE }
 
 	private final HeroModel model;
-	private State state = State.IDLE, previous;
-	private float stateTime, fade = 1;
+	private State state = State.IDLE;
+	/** A move started by an ability event, held until it ends. */
+	private State move;
+	private float stateTime, fade = 1, airTime;
 	private float runPhase;  // 0..1, shared by every direction so blends stay in step
 	private float[] previousPose;
 	private final float[] pose;
 	private float standingEye;
-	private Input last;
-	private String clipA, clipB;
-	private float blend, previousStateTime;
+	private String dashClip = "dash_ground", clipA = "", clipB = "";
+	private float blend;
 
 	public HeroAnimator(HeroModel model) {
 		this.model = model;
@@ -44,19 +42,42 @@ public final class HeroAnimator {
 		return state;
 	}
 
+	/** A Deadlock ability was used (from the plugin's event ring). Movement abilities start moves. */
+	public void ability(String name, Input in) {
+		String n = name.toLowerCase();
+		if (n.contains("dash")) {
+			dashClip = in.grounded() ? "dash_ground" : "dash_air_" + airDirection(in);
+			start(State.DASH);
+		} else if (n.contains("slide")) {
+			start(State.SLIDE);
+		} else if (n.contains("mantle")) {
+			start(State.MANTLE);
+		} else if (n.contains("jump")) {
+			start(in.grounded() || airTime < 0.25f ? State.JUMP : State.AIR_JUMP);
+		}
+	}
+
+	private void start(State s) {
+		move = s;
+		enter(s);
+	}
+
+	private void enter(State next) {
+		previousPose = pose.clone();
+		state = next;
+		stateTime = 0;
+		fade = 0;
+	}
+
 	/** Advances by {@code dt} seconds and returns the skinning matrices (jointCount * 12). */
 	public float[] update(Input in, float dt) {
 		standingEye = Math.max(standingEye, in.eyeHeight());
+		airTime = in.grounded() ? 0 : airTime + dt;
 		double speed = Math.hypot(in.forward(), in.right());
 		boolean crouched = standingEye > 0 && in.eyeHeight() < standingEye * 0.8f;
-		State next = choose(in, speed, crouched);
-		if (next != state) {
-			previousPose = pose.clone();
-			previous = state;
-			state = next;
-			stateTime = 0;
-			fade = 0;
-		}
+		if (move != null && !moveContinues(in, speed)) move = null;
+		State next = move != null ? move : choose(in, speed, crouched);
+		if (next != state) enter(next);
 		stateTime += dt;
 		fade = Math.min(1, fade + dt / FADE_S);
 		if (state == State.RUN || state == State.CROUCH_RUN) {
@@ -66,48 +87,51 @@ public final class HeroAnimator {
 		}
 
 		Arrays.fill(pose, 0);
-		sample(in, speed);
+		sample(in);
 		if (fade < 1 && previousPose != null) {
 			float a = smooth(fade);
 			for (int i = 0; i < pose.length; i++) pose[i] = previousPose[i] * (1 - a) + pose[i] * a;
 		}
-		last = in;
 		return pose;
 	}
 
+	private boolean moveContinues(Input in, double speed) {
+		return switch (move) {
+			case DASH -> stateTime < clipDuration(dashClip);
+			case MANTLE -> stateTime < clipDuration("mantle_64");
+			// A slide lasts while the hero keeps sliding along the ground.
+			case SLIDE -> stateTime < 0.25f || in.grounded() && speed > runSpeed * 0.4 && stateTime < 4f;
+			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f);
+			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded();
+			default -> false;
+		};
+	}
+
 	private State choose(Input in, double speed, boolean crouched) {
-		boolean moving = speed > 0.3;
 		if (!in.grounded()) {
-			if (state == State.DASH && stateTime < clipDuration("dash_air_forward")) return State.DASH;
-			if (speed > runSpeed * dashFactor && state != State.SLIDE) return State.DASH;
-			if (state == State.JUMP && stateTime < clipDuration("jump_ground")) return State.JUMP;
-			// Leaving the ground going up is a jump; otherwise a fall.
-			if (state != State.JUMP && state != State.FALL && in.up() > 2) return State.JUMP;
-			return State.FALL;
+			// Walked off an edge (no jump event): fall after a moment, so steps down don't flicker.
+			return airTime > 0.15f || state == State.FALL ? State.FALL : state;
 		}
-		if (crouched && speed > runSpeed * slideFactor) return State.SLIDE;
-		if (state == State.DASH && stateTime < clipDuration("dash_ground")) return State.DASH;
-		if (!crouched && speed > runSpeed * dashFactor && (state == State.RUN || state == State.IDLE || state == State.DASH)) return State.DASH;
+		boolean moving = speed > 0.3;
 		if (crouched) return moving ? State.CROUCH_RUN : State.CROUCH_IDLE;
 		return moving ? State.RUN : State.IDLE;
 	}
 
-	private void sample(Input in, double speed) {
+	private void sample(Input in) {
 		switch (state) {
-			case IDLE -> play("out_of_combat_stand_idle", stateTime, 1);
-			case CROUCH_IDLE -> play("out_of_combat_crouch_idle", stateTime, 1);
+			case IDLE -> play("out_of_combat_stand_idle", stateTime);
+			case CROUCH_IDLE -> play("out_of_combat_crouch_idle", stateTime);
 			case RUN -> directional("out_of_combat_run_", in);
 			case CROUCH_RUN -> directional("out_of_combat_crouch_run_", in);
-			case JUMP -> play("jump_ground", stateTime, 1);
-			case FALL -> play("in_air_loop_down", stateTime, 1);
+			case JUMP -> play("jump_ground", stateTime);
+			case AIR_JUMP -> play("jump_air", stateTime);
+			case FALL -> play("in_air_loop_down", stateTime);
+			case MANTLE -> play("mantle_64", stateTime);
+			case DASH -> play(dashClip, stateTime);
 			case SLIDE -> {
 				float start = clipDuration("slide_start");
-				if (stateTime < start) play("slide_start", stateTime, 1);
-				else play("slide_loop", stateTime - start, 1);
-			}
-			case DASH -> {
-				if (in.grounded()) play("dash_ground", stateTime, 1);
-				else play("dash_air_" + airDirection(in), stateTime, 1);
+				if (stateTime < start) play("slide_start", stateTime);
+				else play("slide_loop", stateTime - start);
 			}
 		}
 	}
@@ -132,10 +156,10 @@ public final class HeroAnimator {
 		return angle > 0 ? "right" : "left";
 	}
 
-	private void play(String clip, float time, float weight) {
+	private void play(String clip, float time) {
 		HeroModel.Clip c = model.clips.get(clip);
 		if (c == null) c = model.clips.get("out_of_combat_stand_idle");
-		if (c != null) model.accumulate(c, time, weight, pose);
+		if (c != null) model.accumulate(c, time, 1, pose);
 	}
 
 	private void playPhase(String clip, float phase, float weight) {
@@ -154,6 +178,6 @@ public final class HeroAnimator {
 
 	public String describe() {
 		return state + (state == State.RUN || state == State.CROUCH_RUN ? String.format(" %s/%s %.2f", clipA, clipB, blend) : "")
-			+ String.format(" standing eye %.0f", standingEye);
+			+ (state == State.DASH ? " " + dashClip : "") + String.format(" standing eye %.0f", standingEye);
 	}
 }

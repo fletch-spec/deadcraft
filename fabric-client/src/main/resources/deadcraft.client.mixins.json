@@ -2,6 +2,6 @@
   "required": true,
   "package": "dev.deadcraft.client.mixin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["CameraMixin", "FramerateLimitTrackerMixin", "LivingEntityMixin", "LivingEntityRendererMixin", "MinecraftMixin", "ServerGamePacketListenerImplMixin"],
+  "client": ["CameraMixin", "FramerateLimitTrackerMixin", "GameRendererMixin", "LivingEntityMixin", "LivingEntityRendererMixin", "MinecraftMixin", "ServerGamePacketListenerImplMixin"],
   "injectors": { "defaultRequire": 1 }
 }

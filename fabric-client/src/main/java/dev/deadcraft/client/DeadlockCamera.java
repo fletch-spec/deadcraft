@@ -66,6 +66,24 @@ public final class DeadlockCamera {
 		return (int) Math.round(Math.max(30, Math.min(110, vertical)));
 	}
 
+	// ---- dash FOV kick: Deadlock widens its view for a moment when the hero dashes ----
+	/** Peak widening, as a factor on the field of view. Tuned by eye; not read from Deadlock. */
+	private static final float KICK = 0.12f, KICK_RISE_S = 0.06f, KICK_FALL_S = 0.35f;
+	private static long kickStart = Long.MIN_VALUE;
+
+	static void dashKick() {
+		kickStart = System.nanoTime();
+	}
+
+	/** The factor to apply to Minecraft's field of view this frame. */
+	public static float fovScale() {
+		if (!enabled || kickStart == Long.MIN_VALUE) return 1f;
+		float t = (System.nanoTime() - kickStart) / 1e9f;
+		if (t >= KICK_RISE_S + KICK_FALL_S) return 1f;
+		float x = t < KICK_RISE_S ? t / KICK_RISE_S : 1 - (t - KICK_RISE_S) / KICK_FALL_S;
+		return 1f + KICK * x * x * (3 - 2 * x);
+	}
+
 	static String set(float newDistance, float newRight, float newUp) {
 		distance = newDistance;
 		right = newRight;
