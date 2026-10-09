@@ -144,6 +144,26 @@ internal sealed class ColliderPool
 
 	private static float Scale(byte edge) => edge / 2f * Proto.UnitsPerBlock / ModelSize;
 
+	/// <summary>Set when hiding fails, so it is reported once.</summary>
+	public static string? HideProblem;
+
+	// Never drawn: Minecraft draws the world, and thousands of cubes cost Deadlock's GPU time that
+	// Minecraft, sharing the GPU, needs. EF_NODRAW (0x20) and EF_NOSHADOW (0x10) in the networked
+	// m_fEffects; drawing and collision are separate, so the cube still blocks the hero. (A spawn-time
+	// "rendermode" keyvalue was ignored.)
+	private static void Hide(CBaseEntity entity)
+	{
+		try
+		{
+			uint effects = entity.GetField<uint>("CBaseEntity"u8, "m_fEffects"u8);
+			entity.SetField("CBaseEntity"u8, "m_fEffects"u8, effects | 0x20u | 0x10u);
+		}
+		catch (Exception e)
+		{
+			HideProblem ??= e.Message;
+		}
+	}
+
 	private CBaseEntity? Spawn(Key key)
 	{
 		var entity = CBaseEntity.CreateByDesignerName("prop_dynamic");
@@ -153,11 +173,8 @@ internal sealed class ColliderPool
 		ekv.SetVector("origin", Place(key));
 		ekv.SetInt("solid", (int)SolidType.VPhysics);
 		ekv.SetFloat("ModelScale", Scale(key.Edge));
-		// Never drawn: Minecraft draws the world, and thousands of cubes cost Deadlock's GPU time that
-		// Minecraft, sharing the GPU, needs (it waited on the GPU most of each frame while moving).
-		// rendermode 10 is kRenderNone; collision doesn't depend on it.
-		if (HideColliders) ekv.SetInt("rendermode", 10);
 		entity.Spawn(ekv);
+		if (HideColliders) Hide(entity);
 		return entity;
 	}
 }

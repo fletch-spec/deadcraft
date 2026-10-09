@@ -42,7 +42,7 @@ public final class HeroAnimator {
 	private State state = State.IDLE;
 	/** A move started by an ability event, held until it ends. */
 	private State move;
-	private float stateTime, fade = 1, airTime;
+	private float stateTime, fade = 1, airTime, fadeTime = FADE_S;
 	private float runPhase;  // 0..1, shared by every direction so blends stay in step
 	private float[] previousPose;
 	private final float[] pose;
@@ -100,6 +100,8 @@ public final class HeroAnimator {
 		state = next;
 		stateTime = 0;
 		fade = 0;
+		// Bracing against a wall eases in more slowly: snapping the feet round looked abrupt.
+		fadeTime = next == State.WALL ? 0.3f : FADE_S;
 	}
 
 	/** Advances by {@code dt} seconds and returns the skinning matrices (jointCount * 12). */
@@ -127,7 +129,7 @@ public final class HeroAnimator {
 		State next = move != null ? move : choose(in, speed, crouched);
 		if (next != state || next == State.WALL && wallSide != wallBefore) enter(next);
 		stateTime += dt;
-		fade = Math.min(1, fade + dt / FADE_S);
+		fade = Math.min(1, fade + dt / fadeTime);
 		if (state == State.RUN || state == State.CROUCH_RUN) {
 			float rate = (float) Math.max(0.5, Math.min(2.0, speed / (state == State.RUN ? runSpeed : runSpeed * 0.5)));
 			HeroModel.Clip c = model.clips.get(state == State.RUN ? "out_of_combat_run_n" : "out_of_combat_crouch_run_n");
@@ -186,7 +188,7 @@ public final class HeroAnimator {
 			case AIR_JUMP -> play("jump_air", stateTime);
 			case FALL -> play("in_air_loop_down", stateTime);
 			case MANTLE -> play("mantle_64", stateTime * MANTLE_RATE);
-			case WALL -> play("wall_attach_" + wallSide.name().toLowerCase(), stateTime);
+			case WALL -> play("wall_attach_" + wallSide.name().toLowerCase(), stateTime * 0.7f);
 			case DASH -> play(dashClip, stateTime);
 			case SLIDE -> {
 				float start = clipDuration("slide_start");

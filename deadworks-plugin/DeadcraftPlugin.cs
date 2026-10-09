@@ -36,6 +36,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
 	private bool _clientLinked;
+	private bool _reportedHideProblem;
 	private long _nextBridgeAttempt;
 	private string? _bridgeProblem;
 	private float _lastHull;
@@ -167,6 +168,11 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		_clientLinked = linked;
 		if (!linked) return;
 		Log(_colliders.Apply(mc, _cubes));
+		if (ColliderPool.HideProblem is { } problem && !_reportedHideProblem)
+		{
+			_reportedHideProblem = true;
+			Log($"couldn't hide colliders: {problem}");
+		}
 	}
 
 	// Only once colliders exist: before the Minecraft client links, the hero stands on the map's own
