@@ -32,8 +32,8 @@ final class LookPredictor {
 	private static final double DECAY = 0.998;  // per sample: ~8 s memory at 64 Hz
 	private static final double MIN_TURN_VARIANCE = 400;  // decayed sum of squared per-sample turns (degrees^2)
 	private static final double MIN_SCORE = 0.85;
-	private static final double BIAS_TIME_S = 0.03;
-	private static final double SNAP_DEGREES = 4;
+	private static final double BIAS_TIME_S = 0.08;
+	private static final double SNAP_DEGREES = 20;
 	private static final double MAX_SAMPLE_TURN = 30;  // a bigger one-sample turn is a respawn or teleport
 	private static final double MAX_SAMPLE_GAP_S = 0.1;
 	private static final float PITCH_LIMIT = 89f;
@@ -103,7 +103,14 @@ final class LookPredictor {
 		long[] c = counts.countsAt(nanos(time - lag * LAG_STEP_MS / 1000.0));
 		double mYaw = unwrappedYaw - gainYaw * c[0], mPitch = pitch - gainPitch * c[1];
 		double gap = biasValid ? time - lastBiasTime : 0;
-		if (!biasValid || gap > MAX_SAMPLE_GAP_S || Math.abs(mYaw - biasYaw) > SNAP_DEGREES) {
+		double error = Math.abs(mYaw - biasYaw);
+		if (biasValid) {
+			errorSum += error;
+			errorMax = Math.max(errorMax, error);
+			errorSamples++;
+		}
+		if (!biasValid || gap > MAX_SAMPLE_GAP_S || error > SNAP_DEGREES) {
+			if (biasValid) snaps++;
 			biasYaw = mYaw;
 		} else {
 			biasYaw += (mYaw - biasYaw) * (1 - Math.exp(-gap / BIAS_TIME_S));
@@ -120,6 +127,8 @@ final class LookPredictor {
 	}
 
 	private double lastBiasTime;
+	private double errorSum, errorMax;
+	private int errorSamples, snaps;
 
 	/** The look to draw at local time {@code nanos}, or null when not calibrated yet. */
 	Look predict(long nanos) {
@@ -172,7 +181,11 @@ final class LookPredictor {
 		if (lag < 0) {
 			return String.format("look: learning from the mouse (fit %.2f, turned %.0f deg^2 of %.0f needed)", score, syyYaw, MIN_TURN_VARIANCE);
 		}
-		return String.format("look: raw mouse, lag %d ms, %.4f / %.4f deg per count (yaw/pitch), fit now %.3f", lag * LAG_STEP_MS, gainYaw, gainPitch, score);
+		String s = String.format("look: raw mouse, lag %d ms, %.4f / %.4f deg per count (yaw/pitch), fit now %.3f; correction avg %.2f max %.1f deg, %d snaps",
+			lag * LAG_STEP_MS, gainYaw, gainPitch, score, errorSamples == 0 ? 0 : errorSum / errorSamples, errorMax, snaps);
+		errorSum = errorMax = 0;
+		errorSamples = snaps = 0;
+		return s;
 	}
 
 	private static long nanos(double seconds) {

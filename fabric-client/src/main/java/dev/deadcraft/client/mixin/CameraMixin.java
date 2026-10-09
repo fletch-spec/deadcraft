@@ -9,6 +9,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * While linked, the camera is placed like Deadlock's over-the-shoulder camera instead of Minecraft's:
@@ -42,5 +43,11 @@ public abstract class CameraMixin {
 		setPosition(entity.getX(), entity.getY() + DeadlockCamera.eyeHeightBlocks(), entity.getZ());
 		move(0f, DeadlockCamera.upBlocks(), DeadlockCamera.rightBlocks());  // the third axis points right in 26.3
 		move(-getMaxZoom(DeadlockCamera.distanceBlocks()), 0f, 0f);
+	}
+
+	/** Deadlock's dash widens the view for a moment; do the same while linked. */
+	@Inject(method = "calculateFov", at = @At("RETURN"), cancellable = true)
+	private void deadcraft$dashKick(float partialTicks, CallbackInfoReturnable<Float> cir) {
+		if (Follow.linked()) cir.setReturnValue(cir.getReturnValueF() * DeadlockCamera.fovScale());
 	}
 }
