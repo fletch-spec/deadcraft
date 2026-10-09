@@ -165,6 +165,13 @@ public final class Follow {
 
 		if (mc.gui.screen() == null) {
 			// Source yaw 0 faces +x (Minecraft east, yaw -90) and turns toward +y (Minecraft north).
+			if (predicted != null) {
+				// How far ahead of Deadlock's (delayed) angle the raw-mouse camera is drawn this frame.
+				double lead = Math.abs(LookPredictor.wrap(predicted.yaw() - pose.yaw()));
+				leadSum += lead;
+				leadMax = Math.max(leadMax, lead);
+				leadFrames++;
+			}
 			float yaw = -90f - (predicted != null ? predicted.yaw() : pose.yaw());
 			float pitch = predicted != null ? predicted.pitch() : pose.pitch();
 			player.setYRot(yaw);
@@ -185,7 +192,8 @@ public final class Follow {
 
 	// ---- frame timing (logged every 10 s while linked) ----------------------------------------
 
-	private static double lastFrame, statsSince, frameMax, frameSum, exportMax;
+	private static double lastFrame, statsSince, frameMax, frameSum, exportMax, leadSum, leadMax;
+	private static int leadFrames;
 	private static int frames;
 
 	private static void frameStats(Minecraft mc, double now) {
@@ -198,12 +206,14 @@ public final class Follow {
 		lastFrame = now;
 		if (statsSince == 0) statsSince = now;
 		if (now - statsSince < 10 || frames == 0) return;
-		LOG.info("Deadcraft: frames {} avg {} ms ({} fps) worst {} ms; block export worst {} ms; limit {} vsync {}; {}; raw mouse reports {}",
+		LOG.info("Deadcraft: frames {} avg {} ms ({} fps) worst {} ms; block export worst {} ms; limit {} vsync {}; {}; raw mouse reports {}, ahead of Deadlock's angle by {} deg avg, {} max",
 			frames, String.format("%.2f", frameSum / frames * 1000), String.format("%.0f", frames / frameSum),
 			String.format("%.1f", frameMax * 1000), String.format("%.1f", exportMax * 1000),
-			mc.options.framerateLimit().get(), mc.options.enableVsync().get(), look.describe(), rawMouse.reports());
+			mc.options.framerateLimit().get(), mc.options.enableVsync().get(), look.describe(), rawMouse.reports(),
+			String.format("%.2f", leadFrames == 0 ? 0 : leadSum / leadFrames), String.format("%.1f", leadMax));
 		statsSince = now;
-		frameMax = frameSum = exportMax = 0;
+		frameMax = frameSum = exportMax = leadSum = leadMax = 0;
+		leadFrames = 0;
 		frames = 0;
 	}
 
