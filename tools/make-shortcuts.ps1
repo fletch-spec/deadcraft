@@ -39,4 +39,4 @@ New-Shortcut 'Deadcraft 2 - Join with your hero' $steam `
 # The window closes with Minecraft, or stays open to show the error if the build or game fails.
 # cmd /c strips the outermost pair of quotes, so the whole command line is wrapped in one more pair.
 New-Shortcut 'Deadcraft 3 - Show the Minecraft world' "$env:SystemRoot\System32\cmd.exe" `
-	"/c `"`"$repo\fabric-client\gradlew.bat`" -p `"$repo\fabric-client`" runClient || pause`"" "$repo\fabric-client" $null
+	"/c `"`"$repo\fabric-client\gradlew.bat`" -p `"$repo\fabric-client`" runClient || pause`"" "$repo\fabric-client" "$repo\tools\icons\grass-block.ico,0"

@@ -44,12 +44,26 @@ class HeroModelTest {
 		b.putInt(1);
 		float[] inverseBind = {1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 1, 0};
 		for (float f : inverseBind) b.putFloat(f);
-		b.putInt(2);  // clips
+		b.putInt(3);  // clips
 		str(b, "slide");
 		b.putFloat(2f).putInt(2).put((byte) 1);
 		for (int f = 0; f < 2; f++) {
 			for (float x : IDENTITY_TRS) b.putFloat(x);
 			trs(b, f, 1, 0, 0, 0, 0, 1);
+		}
+		// "swing": 170 then 190 degrees about y. Stored as glTF would (w >= 0 each), the two frames sit on
+		// opposite sides of the quaternion sphere, though they are only 20 degrees apart.
+		str(b, "swing");
+		b.putFloat(2f).putInt(2).put((byte) 0);
+		for (double deg : new double[] {170, 190}) {
+			for (float x : IDENTITY_TRS) b.putFloat(x);
+			double h = Math.toRadians(deg) / 2;
+			float qy = (float) Math.sin(h), qw = (float) Math.cos(h);
+			if (qw < 0) {
+				qy = -qy;
+				qw = -qw;
+			}
+			trs(b, 0, 1, 0, 0, qy, 0, qw);
 		}
 		str(b, "turn");
 		float s = (float) Math.sqrt(0.5);
@@ -116,6 +130,14 @@ class HeroModelTest {
 		// Halfway: 45 degrees about y, so x maps to (cos 45, 0, -sin 45).
 		assertEquals(Math.cos(Math.PI / 4), out[0], 1e-5);
 		assertEquals(-Math.sin(Math.PI / 4), out[8], 1e-5);
+	}
+
+	@Test
+	void interpolatesFarSwingsTheShortWay() throws Exception {
+		HeroModel m = HeroModel.read(pack(), Path.of("."));
+		float[] skin = skinAt(m, "swing", 0.25f, 0);  // halfway between 170 and 190: 180 degrees
+		assertEquals(-1, skin[0], 1e-4);   // x maps to -x
+		assertEquals(0, skin[8], 1e-4);
 	}
 
 	@Test

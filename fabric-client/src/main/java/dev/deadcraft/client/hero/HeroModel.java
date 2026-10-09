@@ -166,8 +166,8 @@ public final class HeroModel {
 
 		/**
 		 * Adds {@code weight} of clip {@code clip} at {@code time} seconds (looping, or held at the end),
-		 * interpolating between frames. Rotations are summed on the rest rotation's side of the
-		 * quaternion sphere and normalised in {@link #finish}.
+		 * interpolating between frames. Rotations are summed (see {@link #addRotation}) and normalised
+		 * in {@link #finish}.
 		 */
 		public void add(Clip clip, float time, float weight) {
 			if (weight <= 0) return;
@@ -195,15 +195,28 @@ public final class HeroModel {
 			total += weight;
 		}
 
+		/**
+		 * q and -q are the same rotation, so every pair being mixed is first put on the same side: the
+		 * next frame on the side of this one, and the result on the side of what this joint has gathered
+		 * so far (the rest rotation for the first clip). Choosing each frame's side against the rest pose
+		 * instead flips joints that swing far from rest (skirt panels, landings) between frames, and the
+		 * mix then passes through no rotation at all: the joint whips round.
+		 */
 		private void addRotation(int i, float[] l, int i0, int i1, float a, float weight) {
-			// Each frame's quaternion on the rest rotation's side, then a weighted (unnormalised) lerp.
-			float s0 = sideOfRest(i, l, i0), s1 = sideOfRest(i, l, i1);
-			for (int k = 3; k < 7; k++) trs[i + k] += weight * (s0 * l[i0 + k] * (1 - a) + s1 * l[i1 + k] * a);
-		}
-
-		private float sideOfRest(int i, float[] l, int at) {
-			float d = rest[i + 3] * l[at + 3] + rest[i + 4] * l[at + 4] + rest[i + 5] * l[at + 5] + rest[i + 6] * l[at + 6];
-			return d < 0 ? -1 : 1;
+			float d01 = 0;
+			for (int k = 3; k < 7; k++) d01 += l[i0 + k] * l[i1 + k];
+			float s1 = d01 < 0 ? -1 : 1;
+			float q0 = l[i0 + 3] + (s1 * l[i1 + 3] - l[i0 + 3]) * a;
+			float q1 = l[i0 + 4] + (s1 * l[i1 + 4] - l[i0 + 4]) * a;
+			float q2 = l[i0 + 5] + (s1 * l[i1 + 5] - l[i0 + 5]) * a;
+			float q3 = l[i0 + 6] + (s1 * l[i1 + 6] - l[i0 + 6]) * a;
+			float[] ref = total > 0 ? trs : rest;
+			float d = ref[i + 3] * q0 + ref[i + 4] * q1 + ref[i + 5] * q2 + ref[i + 6] * q3;
+			float s = (d < 0 ? -1 : 1) * weight;
+			trs[i + 3] += s * q0;
+			trs[i + 4] += s * q1;
+			trs[i + 5] += s * q2;
+			trs[i + 6] += s * q3;
 		}
 
 		/** Divides out the summed weights and normalises rotations. With nothing added, the rest pose. */
