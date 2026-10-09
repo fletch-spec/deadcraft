@@ -241,41 +241,4 @@ class HeroRealPackTest {
 		}
 		return far;
 	}
-
-	@Test
-	void landingFarthestReport() throws Exception {
-		HeroModel m = celeste();
-		float[] world = new float[m.nodeCount() * 12], skin = new float[m.skinnedJointCount() * 12];
-		StringBuilder out = new StringBuilder();
-		int pelvis = m.node("pelvis");
-		for (String name : new String[] {"landing_impact_idle", "in_air_loop_down", "out_of_combat_stand_idle"}) {
-			HeroModel.Clip c = m.clips.get(name);
-			for (int f = 0; f < c.frames(); f += Math.max(1, c.frames() / 4)) {
-				HeroModel.Pose pose = sample(m, c, f / c.fps());
-				m.skin(pose, world, 0, new int[0], new float[0], skin);
-				double hx = world[pelvis * 12 + 3], hy = world[pelvis * 12 + 7], hz = world[pelvis * 12 + 11];
-				double far = 0; int farV = 0;
-				for (int v = 0; v < m.vertexCount(); v++) {
-					float x = m.positions[v * 3], y = m.positions[v * 3 + 1], z = m.positions[v * 3 + 2];
-					double px = 0, py = 0, pz = 0;
-					for (int k = 0; k < 4; k++) {
-						float w = m.weights[v * 4 + k];
-						if (w <= 0) continue;
-						int b = m.joints[v * 4 + k] * 12;
-						px += w * (skin[b] * x + skin[b + 1] * y + skin[b + 2] * z + skin[b + 3]);
-						py += w * (skin[b + 4] * x + skin[b + 5] * y + skin[b + 6] * z + skin[b + 7]);
-						pz += w * (skin[b + 8] * x + skin[b + 9] * y + skin[b + 10] * z + skin[b + 11]);
-					}
-					double d = Math.sqrt((px - hx) * (px - hx) + (py - hy) * (py - hy) + (pz - hz) * (pz - hz));
-					if (d > far) { far = d; farV = v; }
-				}
-				StringBuilder j = new StringBuilder();
-				for (int k = 0; k < 4; k++) if (m.weights[farV * 4 + k] > 0) j.append(' ').append(m.nodeNames[m.skinNodes[m.joints[farV * 4 + k]]]);
-				String mat = "";
-				for (var mt : m.materials) for (int idx : mt.indices()) if (idx == farV) { mat = mt.name(); break; }
-				out.append(String.format("%s f%d: pelvis at y %.2f, farthest %.2f m from pelvis, vertex %d (%s):%s%n", name, f, hy, far, farV, mat, j));
-			}
-		}
-		Files.writeString(Path.of("build", "landing-farthest.txt"), out);
-	}
 }

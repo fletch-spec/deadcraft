@@ -56,7 +56,7 @@ package.OptimizeEntriesForBinarySearch();
 package.Read(vpk);
 
 // The hero's model: models/heroes*/<hero>/<hero>.vmdl_c (heroes, heroes_wip, ...).
-var models = package.Entries.TryGetValue("vmdl_c", out var entries)
+var models = package.Entries?.TryGetValue("vmdl_c", out var entries) == true
 	? entries.Where(e => e.DirectoryName != null && e.DirectoryName.StartsWith("models/heroes", StringComparison.Ordinal)
 		&& e.DirectoryName.EndsWith("/" + hero, StringComparison.Ordinal) && e.FileName == hero).ToList()
 	: [];

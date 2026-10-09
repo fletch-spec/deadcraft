@@ -2,7 +2,7 @@
 
 Play on a Minecraft Java server as a real Deadlock hero (first target: Celeste). Deadlock's own engine supplies the movement and abilities; Minecraft supplies the world, blocks, mobs, other players and the picture you look at.
 
-> **Status: playable in singleplayer as Celeste (model and core movement animations); next is the remaining animations, then M5.** Start with [docs/STATUS.md](docs/STATUS.md). Celeste plays in a Minecraft world: Deadlock moves her, Minecraft draws over Deadlock's window with a Deadlock-style third-person camera, and Minecraft's blocks are live Deadlock colliders.
+> **Status: playable in singleplayer as Celeste, with her model and movement animations; next is aiming, combat and her abilities, then multiplayer.** Start with [docs/STATUS.md](docs/STATUS.md). Celeste plays in a Minecraft world: Deadlock moves her, Minecraft draws over Deadlock's window with a Deadlock-style third-person camera, and Minecraft's blocks are live Deadlock colliders.
 
 ## How it works
 

@@ -120,6 +120,7 @@ public final class HeroRenderer {
 			model = m;
 			renderTypes = types;
 			animator = new HeroAnimator(m);
+			pelvis = m.node("pelvis");
 			skinned = new float[m.positions.length];
 			skinnedNormals = new float[m.normals.length];
 			problem = "";
@@ -201,6 +202,7 @@ public final class HeroRenderer {
 	/** A vertex this far from the pelvis is a broken pose (the body itself spans about 1.5 m). */
 	private static final double SPIKE_METRES = 2.0;
 	private static long lastSpikeReport;
+	private static int pelvis = -1;
 
 	/**
 	 * Logs (at most once a second) when part of the posed model is far from the pelvis, with the
@@ -208,7 +210,6 @@ public final class HeroRenderer {
 	 * same export don't reproduce.
 	 */
 	private static void reportSpikes(long now) {
-		int pelvis = model.node("pelvis");
 		if (pelvis < 0 || now - lastSpikeReport < 1_000_000_000L) return;
 		float[] world = animator.lastWorld();
 		double hx = world[pelvis * 12 + 3], hy = world[pelvis * 12 + 7], hz = world[pelvis * 12 + 11], far = 0;

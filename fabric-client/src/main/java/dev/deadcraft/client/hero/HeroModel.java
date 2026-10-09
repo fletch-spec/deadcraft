@@ -415,15 +415,6 @@ public final class HeroModel {
 		return false;
 	}
 
-	/** Node {@code node}'s placement relative to node {@code to}, from built world matrices, into out[0..12]. */
-	public static void relative(float[] world, int node, int to, float[] out) {
-		float[] inv = new float[12];
-		inverse(world, to * 12, inv);
-		int o = node * 12;
-		mul(inv, 0, world[o], world[o + 1], world[o + 2], world[o + 3], world[o + 4], world[o + 5], world[o + 6], world[o + 7], world[o + 8],
-			world[o + 9], world[o + 10], world[o + 11], out, 0);
-	}
-
 	/** out[o..] = parent[po..] * node n's local transform (the local alone when parent is null). */
 	private static void local(float[] t, int n, float[] out, int o, float[] parent, int po) {
 		int i = n * TRS;
@@ -443,23 +434,6 @@ public final class HeroModel {
 		} else {
 			mul(parent, po, l00, l01, l02, l03, l10, l11, l12, l13, l20, l21, l22, l23, out, o);
 		}
-	}
-
-	/** The inverse of the 3x4 affine at a[ao..], into out[0..12]. */
-	private static void inverse(float[] a, int ao, float[] out) {
-		float a00 = a[ao], a01 = a[ao + 1], a02 = a[ao + 2], a10 = a[ao + 4], a11 = a[ao + 5], a12 = a[ao + 6];
-		float a20 = a[ao + 8], a21 = a[ao + 9], a22 = a[ao + 10];
-		float c00 = a11 * a22 - a12 * a21, c01 = a02 * a21 - a01 * a22, c02 = a01 * a12 - a02 * a11;
-		float c10 = a12 * a20 - a10 * a22, c11 = a00 * a22 - a02 * a20, c12 = a02 * a10 - a00 * a12;
-		float c20 = a10 * a21 - a11 * a20, c21 = a01 * a20 - a00 * a21, c22 = a00 * a11 - a01 * a10;
-		float det = a00 * c00 + a01 * c10 + a02 * c20;
-		float inv = Math.abs(det) < 1e-12f ? 0 : 1 / det;
-		float b00 = c00 * inv, b01 = c01 * inv, b02 = c02 * inv, b10 = c10 * inv, b11 = c11 * inv, b12 = c12 * inv;
-		float b20 = c20 * inv, b21 = c21 * inv, b22 = c22 * inv;
-		float tx = a[ao + 3], ty = a[ao + 7], tz = a[ao + 11];
-		out[0] = b00; out[1] = b01; out[2] = b02; out[3] = -(b00 * tx + b01 * ty + b02 * tz);
-		out[4] = b10; out[5] = b11; out[6] = b12; out[7] = -(b10 * tx + b11 * ty + b12 * tz);
-		out[8] = b20; out[9] = b21; out[10] = b22; out[11] = -(b20 * tx + b21 * ty + b22 * tz);
 	}
 
 	/** out[o..] = a[ao..] * b, both 3x4 with an implied (0, 0, 0, 1) last row. */

@@ -211,10 +211,6 @@ public final class Follow {
 		TestHud.frame(localNow, (localNow - timeline.localTime(hero.serverTime)) * 1000);
 	}
 
-	static double positionDelayMs() {
-		return timeline.delay() * 1000;
-	}
-
 	static String timelineHudLine() {
 		int[] d = timeline.takeDryFrames();
 		return String.format("position drawn %.0f ms behind (%s), ran past the newest sample on %d of %d frames", timeline.delay() * 1000,
