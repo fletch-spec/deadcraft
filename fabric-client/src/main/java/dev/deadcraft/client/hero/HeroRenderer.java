@@ -162,6 +162,7 @@ public final class HeroRenderer {
 		animator.setLook(((target - bodyYaw) % 360 + 540) % 360 - 180);
 		float[] matrices = animator.update(input, dt);
 		skin(matrices);
+		reportSpikes(now);
 		skinNanos += System.nanoTime() - t0;
 		hudSkinNanos += System.nanoTime() - t0;
 
@@ -178,6 +179,41 @@ public final class HeroRenderer {
 		poseStack.popPose();
 		frames++;
 		hudFrames++;
+	}
+
+	/** A vertex this far from the pelvis is a broken pose (the body itself spans about 1.5 m). */
+	private static final double SPIKE_METRES = 2.0;
+	private static long lastSpikeReport;
+
+	/**
+	 * Logs (at most once a second) when part of the posed model is far from the pelvis, with the
+	 * animator's state and the joints that vertex hangs from: spikes seen in game that the tests on the
+	 * same export don't reproduce.
+	 */
+	private static void reportSpikes(long now) {
+		int pelvis = model.node("pelvis");
+		if (pelvis < 0 || now - lastSpikeReport < 1_000_000_000L) return;
+		float[] world = animator.lastWorld();
+		double hx = world[pelvis * 12 + 3], hy = world[pelvis * 12 + 7], hz = world[pelvis * 12 + 11], far = 0;
+		int farV = -1;
+		for (int v = 0, nv = model.vertexCount(); v < nv; v++) {
+			double dx = skinned[v * 3] - hx, dy = skinned[v * 3 + 1] - hy, dz = skinned[v * 3 + 2] - hz;
+			double d = dx * dx + dy * dy + dz * dz;
+			if (d > far) {
+				far = d;
+				farV = v;
+			}
+		}
+		far = Math.sqrt(far);
+		if (far < SPIKE_METRES) return;
+		lastSpikeReport = now;
+		StringBuilder joints = new StringBuilder();
+		for (int k = 0; k < 4; k++) {
+			float w = model.weights[farV * 4 + k];
+			if (w > 0) joints.append(String.format(" %s %.2f", model.nodeNames[model.skinNodes[model.joints[farV * 4 + k]]], w));
+		}
+		LOG.warn("Deadcraft: hero spike: vertex {} is {} m from the pelvis ({}); {}", farV, String.format("%.2f", far), joints.toString().trim(),
+			animator.debugLine());
 	}
 
 	private static void skin(float[] m) {

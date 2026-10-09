@@ -36,6 +36,10 @@ public final class HeroAnimator {
 	static final double MOVE_START = 0.5, MOVE_STOP = 0.2;
 	/** Body turn speed (degrees/s) at which standing feet fully step. */
 	static final float TURN_STEP_RATE = 240f;
+	/** Step cycles per second at full turning speed (1.5 looked like scurrying). */
+	static final float STEP_CYCLES_PER_S = 0.7f;
+	/** How strongly the stepping legs show at full turning speed, and how fast that eases in and out. */
+	static final float STEP_WEIGHT = 0.4f, STEP_EASE_S = 0.15f;
 	/** A fall this long lands with an impact; a run this fast stops with a skid. */
 	static final float LAND_AFTER_S = 0.45f, STOP_FROM_SPEED = 3f;
 	/** The upper body turns at most this far from the feet, degrees. */
@@ -50,6 +54,13 @@ public final class HeroAnimator {
 
 	private final HeroModel model;
 	private final HeroModel.Pose pose, previous, shown, steps;
+	/**
+	 * Where additive clips (landing, skid) apply: below the pelvis (spine, arms, head, legs). Their root
+	 * and pelvis channels are in another frame, and the skirt's cloth isn't in them at all.
+	 */
+	private final boolean[] layered;
+	/** Eased strength of the stepping legs, so steps fade in and out instead of switching. */
+	private float stepWeight;
 	/** The legs, for stepping round on the spot without moving the hips. */
 	private final boolean[] legs;
 	private final float[] world, skin;
@@ -78,6 +89,7 @@ public final class HeroAnimator {
 		shown = model.newPose();
 		steps = model.newPose();
 		legs = model.subtree("leg_upper_L", "leg_upper_R");
+		layered = model.subtree("spine_0", "leg_upper_L", "leg_upper_R");
 		world = new float[model.nodeCount() * 12];
 		skin = new float[model.skinnedJointCount() * 12];
 		int found = 0;
@@ -93,6 +105,11 @@ public final class HeroAnimator {
 		hand = model.node("hand_R");
 		lookNodes = java.util.Arrays.copyOf(nodes, found);
 		lookShares = java.util.Arrays.copyOf(shares, found);
+	}
+
+	/** The node world matrices of the last {@link #update} (for tests). */
+	float[] lastWorld() {
+		return world;
 	}
 
 	public State state() {
@@ -156,7 +173,9 @@ public final class HeroAnimator {
 		hull = in.hullHeight();
 		standingHull = Math.max(standingHull, hull);
 		clock += dt;
-		turnPhase = (turnPhase + dt * Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 1.5f) % 1f;
+		turnPhase = (turnPhase + dt * Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * STEP_CYCLES_PER_S) % 1f;
+		float stepTarget = Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE);
+		stepWeight += (stepTarget - stepWeight) * (1 - (float) Math.exp(-dt / STEP_EASE_S));
 		boolean landed = in.grounded() && !grounded;
 		float airTimeBefore = airTime;
 		grounded = in.grounded();
@@ -246,14 +265,24 @@ public final class HeroAnimator {
 			case MANTLE -> play(mantleClip, stateTime * MANTLE_RATE);
 			case WALL -> play("wall_attach_" + wallSide.name().toLowerCase(), stateTime * 0.7f);
 			case DASH -> play(dashClip, stateTime);
-			case LAND -> play("landing_impact_idle", stateTime);
-			case STOP -> play("run_to_stop_stand", stateTime);
+			case LAND -> layer("out_of_combat_stand_idle", "landing_impact_idle");
+			case STOP -> layer("out_of_combat_stand_idle", "run_to_stop_stand");
 			case SLIDE -> {
 				float start = clipDuration("slide_start");
 				if (stateTime < start) play("slide_start", stateTime);
 				else play("slide_loop", stateTime - start);
 			}
 		}
+	}
+
+	/** A base clip with an additive clip layered on it (fading out over its last tenth of a second). */
+	private void layer(String baseClip, String layerClip) {
+		HeroModel.Clip base = model.clips.get(baseClip), top = model.clips.get(layerClip);
+		if (base != null) pose.add(base, stateTime, 1);
+		pose.finish();
+		if (top == null || !top.additive()) return;
+		float left = top.duration() - stateTime;
+		pose.addLayer(top, stateTime, Math.max(0, Math.min(1, left / 0.1f)), layered);
 	}
 
 	/**
@@ -264,7 +293,7 @@ public final class HeroAnimator {
 	private void idle(String idleClip, String runPrefix) {
 		HeroModel.Clip c = model.clips.get(idleClip);
 		if (c != null) pose.add(c, stateTime, 1);
-		float w = Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 0.7f;
+		float w = stepWeight * STEP_WEIGHT;
 		HeroModel.Clip step = model.clips.get(runPrefix + (turnRate > 0 ? "e" : "w"));
 		if (w <= 0 || step == null) return;
 		pose.finish();
@@ -312,6 +341,13 @@ public final class HeroAnimator {
 
 	private static float smooth(float x) {
 		return x * x * (3 - 2 * x);
+	}
+
+	/** Everything about the current blend, for the spike report. */
+	String debugLine() {
+		return String.format("state %s for %.2f s (fade %.2f of %.2f s), move %s, clips %s/%s %.2f, dash %s, mantle %s, wall %s, look %.0f, turn %.0f, "
+			+ "speed %.1f, %s, eye %.0f, hull %.0f, air %.2f s", state, stateTime, fade, fadeTime, move, clipA, clipB, blend, dashClip, mantleClip,
+			wallSide, look, turnRate, speed, grounded ? "ground" : "air", eye, hull, airTime);
 	}
 
 	/** For the test HUD. */

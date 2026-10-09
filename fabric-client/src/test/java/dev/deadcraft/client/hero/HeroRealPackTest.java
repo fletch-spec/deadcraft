@@ -49,9 +49,7 @@ class HeroRealPackTest {
 		float[] world = new float[m.nodeCount() * 12], skin = new float[m.skinnedJointCount() * 12];
 		for (HeroModel.Clip c : m.clips.values()) {
 			for (int f = 0; f < c.frames(); f++) {
-				HeroModel.Pose pose = m.newPose();
-				pose.add(c, f / c.fps(), 1);
-				pose.finish();
+				HeroModel.Pose pose = sample(m, c, f / c.fps());
 				m.skin(pose, world, 0, new int[0], new float[0], skin);
 				double reach = reach(m, skin);
 				assertTrue(reach < MAX_REACH, c.name() + " frame " + f + " reaches " + reach + " m");
@@ -96,6 +94,20 @@ class HeroRealPackTest {
 		}
 	}
 
+	/** A clip's pose at a time; an additive clip layered on the standing idle, as the animator plays it. */
+	private static HeroModel.Pose sample(HeroModel m, HeroModel.Clip c, float time) {
+		HeroModel.Pose pose = m.newPose();
+		if (!c.additive()) {
+			pose.add(c, time, 1);
+			pose.finish();
+			return pose;
+		}
+		pose.add(m.clips.get("out_of_combat_stand_idle"), time, 1);
+		pose.finish();
+		pose.addLayer(c, time, 1, m.subtree("spine_0", "leg_upper_L", "leg_upper_R"));
+		return pose;
+	}
+
 	/** The furthest skinned vertex from the middle of the body (1.2 m up). */
 	private static double reach(HeroModel m, float[] skin) {
 		double far = 0;
@@ -113,6 +125,29 @@ class HeroRealPackTest {
 			far = Math.max(far, Math.sqrt(px * px + (py - 1.2) * (py - 1.2) + pz * pz));
 		}
 		return far;
+	}
+
+	/** The skirt through the animator: a standing jump, a fall and the landing, fades included. */
+	@Test
+	void skirtStaysOnTheHipsThroughALanding() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		int pelvis = m.node("pelvis");
+		float dt = 1 / 240f;
+		StringBuilder trace = new StringBuilder();
+		double worst = 0;
+		for (int i = 0; i < 240 * 3; i++) {
+			float t = i * dt;
+			boolean air = t > 0.5f && t < 1.45f;
+			var in = new HeroAnimator.Input(0, 0, air ? (t < 1 ? 4 : -6) : 0, !air, 86, 112, HeroAnimator.Wall.NONE);
+			if (Math.abs(t - 0.5f) < dt / 2) anim.ability("citadel_ability_jump", in, Double.NaN);
+			float[] skin = anim.update(in, dt);
+			double d = skirtReach(m, skin, anim.lastWorld(), pelvis);
+			worst = Math.max(worst, d);
+			if (i % 6 == 0) trace.append(String.format("%.3f %s %.2f%n", t, anim.state(), d));
+		}
+		Files.writeString(Path.of("build", "skirt-landing.txt"), trace);
+		assertTrue(worst < SKIRT_REACH, "skirt " + worst + " m from the hips during the landing; see build/skirt-landing.txt");
 	}
 
 	/** With the upper body turned towards the camera, the wand stays in the right hand. */
@@ -150,9 +185,7 @@ class HeroRealPackTest {
 		for (HeroModel.Clip c : m.clips.values()) {
 			double worst = 0;
 			for (int f = 0; f < c.frames(); f++) {
-				HeroModel.Pose pose = m.newPose();
-				pose.add(c, f / c.fps(), 1);
-				pose.finish();
+				HeroModel.Pose pose = sample(m, c, f / c.fps());
 				m.skin(pose, world, 0, new int[0], new float[0], skin);
 				double d = skirtReach(m, skin, world, pelvis);
 				if (d > worst) worst = d;
@@ -188,5 +221,42 @@ class HeroRealPackTest {
 			far = Math.max(far, Math.sqrt((px - hx) * (px - hx) + (py - hy) * (py - hy) + (pz - hz) * (pz - hz)));
 		}
 		return far;
+	}
+
+	@Test
+	void landingFarthestReport() throws Exception {
+		HeroModel m = celeste();
+		float[] world = new float[m.nodeCount() * 12], skin = new float[m.skinnedJointCount() * 12];
+		StringBuilder out = new StringBuilder();
+		int pelvis = m.node("pelvis");
+		for (String name : new String[] {"landing_impact_idle", "in_air_loop_down", "out_of_combat_stand_idle"}) {
+			HeroModel.Clip c = m.clips.get(name);
+			for (int f = 0; f < c.frames(); f += Math.max(1, c.frames() / 4)) {
+				HeroModel.Pose pose = sample(m, c, f / c.fps());
+				m.skin(pose, world, 0, new int[0], new float[0], skin);
+				double hx = world[pelvis * 12 + 3], hy = world[pelvis * 12 + 7], hz = world[pelvis * 12 + 11];
+				double far = 0; int farV = 0;
+				for (int v = 0; v < m.vertexCount(); v++) {
+					float x = m.positions[v * 3], y = m.positions[v * 3 + 1], z = m.positions[v * 3 + 2];
+					double px = 0, py = 0, pz = 0;
+					for (int k = 0; k < 4; k++) {
+						float w = m.weights[v * 4 + k];
+						if (w <= 0) continue;
+						int b = m.joints[v * 4 + k] * 12;
+						px += w * (skin[b] * x + skin[b + 1] * y + skin[b + 2] * z + skin[b + 3]);
+						py += w * (skin[b + 4] * x + skin[b + 5] * y + skin[b + 6] * z + skin[b + 7]);
+						pz += w * (skin[b + 8] * x + skin[b + 9] * y + skin[b + 10] * z + skin[b + 11]);
+					}
+					double d = Math.sqrt((px - hx) * (px - hx) + (py - hy) * (py - hy) + (pz - hz) * (pz - hz));
+					if (d > far) { far = d; farV = v; }
+				}
+				StringBuilder j = new StringBuilder();
+				for (int k = 0; k < 4; k++) if (m.weights[farV * 4 + k] > 0) j.append(' ').append(m.nodeNames[m.skinNodes[m.joints[farV * 4 + k]]]);
+				String mat = "";
+				for (var mt : m.materials) for (int idx : mt.indices()) if (idx == farV) { mat = mt.name(); break; }
+				out.append(String.format("%s f%d: pelvis at y %.2f, farthest %.2f m from pelvis, vertex %d (%s):%s%n", name, f, hy, far, farV, mat, j));
+			}
+		}
+		Files.writeString(Path.of("build", "landing-farthest.txt"), out);
 	}
 }

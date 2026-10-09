@@ -21,12 +21,13 @@ import java.util.Map;
  * skeleton and the skinning matrices, with an optional turn of the upper body (to the camera).
  */
 public final class HeroModel {
-	public static final int VERSION = 2;
+	public static final int VERSION = 3;
 	static final int TRS = 10;
 
 	public record Material(String name, String texture, int[] indices) {}
 
-	public record Clip(String name, float fps, int frames, boolean loop, float[] locals) {
+	/** {@code additive}: the frames are changes from the bind pose, to layer with {@link Pose#addLayer}. */
+	public record Clip(String name, float fps, int frames, boolean loop, boolean additive, float[] locals) {
 		public float duration() {
 			return loop ? frames / fps : (frames - 1) / fps;
 		}
@@ -150,11 +151,12 @@ public final class HeroModel {
 			String name = string(b);
 			float fps = b.getFloat();
 			int frames = b.getInt();
-			boolean loop = b.get() != 0;
+			int flags = b.get();
+			boolean loop = (flags & 1) != 0, additive = (flags & 2) != 0;
 			float[] locals = new float[frames * nodes * TRS];
 			b.asFloatBuffer().get(locals);
 			b.position(b.position() + locals.length * 4);
-			clips.put(name, new Clip(name, fps, frames, loop, locals));
+			clips.put(name, new Clip(name, fps, frames, loop, additive, locals));
 		}
 		return new HeroModel(directory, materials, p, n, uv, c, j, w, nodeNames, parents, rest, skinNodes, inverseBinds, clips);
 	}
@@ -228,6 +230,45 @@ public final class HeroModel {
 			trs[i + 4] += s * q1;
 			trs[i + 5] += s * q2;
 			trs[i + 6] += s * q3;
+		}
+
+		/**
+		 * Layers an additive clip on this (finished) pose, for the nodes {@code mask} marks: each
+		 * rotation is turned further by the clip's change ({@code weight} of it), each translation moved
+		 * by the change's. The changes are against the bind pose, local to each joint.
+		 */
+		public void addLayer(Clip clip, float time, float weight, boolean[] mask) {
+			if (weight <= 0) return;
+			int frames = clip.frames();
+			float f = Math.max(0, Math.min(time * clip.fps(), frames - 1));
+			int f0 = (int) f, f1 = Math.min(f0 + 1, frames - 1);
+			float a = f - f0;
+			float[] l = clip.locals();
+			int stride = nodeCount() * TRS;
+			for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
+				if (!mask[n]) continue;
+				int i = n * TRS, i0 = f0 * stride + i, i1 = f1 * stride + i;
+				// The change's rotation: nlerp between frames, then weighted towards no change. Its translation
+				// (added below) is already relative to the bind pose's.
+				int r = i + 3;
+				float d0 = 0;
+				for (int k = 3; k < 7; k++) d0 += l[i0 + k] * l[i1 + k];
+				float s1 = d0 < 0 ? -1 : 1;
+				float dx = l[i0 + 3] + (s1 * l[i1 + 3] - l[i0 + 3]) * a, dy = l[i0 + 4] + (s1 * l[i1 + 4] - l[i0 + 4]) * a;
+				float dz = l[i0 + 5] + (s1 * l[i1 + 5] - l[i0 + 5]) * a, dw = l[i0 + 6] + (s1 * l[i1 + 6] - l[i0 + 6]) * a;
+				if (dw < 0) {
+					dx = -dx; dy = -dy; dz = -dz; dw = -dw;
+				}
+				dx *= weight; dy *= weight; dz *= weight; dw = 1 + (dw - 1) * weight;
+				float qx = trs[r], qy = trs[r + 1], qz = trs[r + 2], qw = trs[r + 3];
+				// base * change: the change turns the joint within its own (local) frame.
+				trs[r] = qw * dx + qx * dw + qy * dz - qz * dy;
+				trs[r + 1] = qw * dy - qx * dz + qy * dw + qz * dx;
+				trs[r + 2] = qw * dz + qx * dy - qy * dx + qz * dw;
+				trs[r + 3] = qw * dw - qx * dx - qy * dy - qz * dz;
+				normalise(trs, r);
+				for (int k = 0; k < 3; k++) trs[i + k] += weight * (l[i0 + k] + (l[i1 + k] - l[i0 + k]) * a);
+			}
 		}
 
 		/** Divides out the summed weights and normalises rotations. With nothing added, the rest pose. */
