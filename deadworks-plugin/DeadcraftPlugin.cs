@@ -71,7 +71,18 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		if (Server.MapName != VoidMap || pawn.IsBot || pawn.Controller == null) return;
 		Server.ExecuteCommand("sv_cheats 1");
 		Server.ClientCommand(pawn.Controller.Slot, "mat_fullbright 1");
-		Log($"mat_fullbright 1 sent to slot {pawn.Controller.Slot}");
+		int original = DeadlockFrameCap.Original();
+		Server.ClientCommand(pawn.Controller.Slot, $"fps_max {DeadlockFrameCap.WhilePlaying}");
+		Log($"mat_fullbright 1 and fps_max {DeadlockFrameCap.WhilePlaying} sent to slot {pawn.Controller.Slot} (their own fps_max {original} is restored on disconnect)");
+	}
+
+	// Put the player's own frame cap back as they leave (see DeadlockFrameCap).
+	public override void OnClientDisconnecting(ClientDisconnectedEvent e)
+	{
+		if (Server.MapName != VoidMap) return;
+		int original = DeadlockFrameCap.Original();
+		Server.ClientCommand(e.Slot, $"fps_max {original}");
+		Log($"fps_max {original} sent back to slot {e.Slot} as it disconnects");
 	}
 
 	public override void OnUnload()
