@@ -28,6 +28,15 @@ final class HeroTimeline {
 
 	private final ArrayDeque<Sample> samples = new ArrayDeque<>();
 	private double delay = DELAY_S;
+	/**
+	 * Adaptive: the delay follows how late samples actually arrive (Deadlock's server doesn't tick
+	 * perfectly evenly), so frames rarely run past the newest sample. Off in tests and when the delay
+	 * is set by hand.
+	 */
+	private boolean adaptive;
+	private double latenessPeak, lastAddLocal;
+	private static final double TICK_S = 1 / 64.0, PEAK_DECAY_S = 2.0, MIN_DELAY_S = 0.018, MAX_DELAY_S = 0.06;
+	private int dryFrames, frames;
 	/** local clock - server clock, tracking the earliest arrivals (the least delayed ones). */
 	private double offset = Double.NaN;
 
@@ -48,6 +57,11 @@ final class HeroTimeline {
 		offset = Double.isNaN(offset) || o < offset ? o : offset + (o - offset) * OFFSET_RISE;
 		samples.addLast(s);
 		while (samples.size() > KEEP) samples.removeFirst();
+		double lateness = o - offset;  // how much later than the earliest-arriving samples
+		if (lastAddLocal > 0) latenessPeak *= Math.exp(-(localNow - lastAddLocal) / PEAK_DECAY_S);
+		latenessPeak = Math.max(latenessPeak, lateness);
+		lastAddLocal = localNow;
+		if (adaptive) delay = Math.max(MIN_DELAY_S, Math.min(MAX_DELAY_S, TICK_S + latenessPeak + 0.003));
 	}
 
 	/** Shifts every stored sample, for a recentre (the hero and the world moved together). */
@@ -63,6 +77,22 @@ final class HeroTimeline {
 	/** Seconds behind the newest sample that frames are drawn (DELAY_S by default). */
 	void setDelay(double seconds) {
 		delay = seconds;
+		adaptive = false;
+	}
+
+	void setAdaptive() {
+		adaptive = true;
+	}
+
+	boolean adaptive() {
+		return adaptive;
+	}
+
+	/** Frames drawn past the newest sample (extrapolated) since the last call, and frames in all. */
+	int[] takeDryFrames() {
+		int[] r = {dryFrames, frames};
+		dryFrames = frames = 0;
+		return r;
 	}
 
 	double delay() {
@@ -82,7 +112,9 @@ final class HeroTimeline {
 	Pose poseAt(double localNow) {
 		Sample newest = samples.peekLast();
 		double t = localNow - offset - delay;
+		frames++;
 		if (t >= newest.serverTime()) {
+			dryFrames++;
 			double dt = Math.min(t - newest.serverTime(), MAX_EXTRAPOLATE_S);
 			return new Pose(newest.x() + newest.vx() * dt, newest.y() + newest.vy() * dt, newest.z() + newest.vz() * dt,
 				newest.yaw(), newest.pitch());

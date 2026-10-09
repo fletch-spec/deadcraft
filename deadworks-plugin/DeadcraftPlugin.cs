@@ -128,6 +128,21 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		bool linked = (mc.Flags & (uint)McFlags.Linked) != 0;
 		if (linked != _clientLinked) Log(linked ? "Minecraft client linked" : "Minecraft client unlinked");
 		if (linked && !_clientLinked) _colliders.ClientRelinked();
+		if (linked != _clientLinked && Server.MapName == VoidMap && FindHero() is { } hero)
+		{
+			if (!linked && hero.IsAlive)
+			{
+				// The stale colliders no longer follow the world, so a hero left to wander can walk off them
+				// and off the slab. Park it in the middle of the slab until the client links again.
+				hero.Teleport(position: SlabCentreTop + new Vector3(0f, 0f, 16f), velocity: Vector3.Zero);
+				Log("parked the hero on the slab while Minecraft is unlinked");
+			}
+			else if (linked && !hero.IsAlive)
+			{
+				hero.ForceRespawn(true);  // don't make the player wait out a death from while they were away
+				Log("respawned the hero for the relinked client");
+			}
+		}
 		_clientLinked = linked;
 		if (!linked) return;
 		Log(_colliders.Apply(mc, _cubes));

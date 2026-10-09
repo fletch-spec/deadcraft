@@ -49,13 +49,15 @@ public final class Follow {
 	private static Vec3 lastDisplacement;
 	private static final BlockExport export = new BlockExport();
 	private static final HeroTimeline timeline = new HeroTimeline();
+	static {
+		timeline.setAdaptive();
+	}
 	private static final Overlay overlay = new Overlay();
 	private static final RawMouse rawMouse = new RawMouse();
 	private static final LookPredictor look = new LookPredictor(rawMouse);
 	private static boolean rawLook = true;
 	private static long lastLookTick = -1;
 	private static int lastAbilitySerial = -1;
-	private static final java.util.Set<String> abilitiesSeen = new java.util.HashSet<>();
 	private static boolean savedBobView;
 	private static long lastGoodRead;
 
@@ -139,7 +141,7 @@ public final class Follow {
 		}
 		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
 
-		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z());
+		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z(), HeroRenderer.sliding(), localNow);
 		readAbilities(hero);
 		{
 			// Hero model animation: velocity relative to where the body faces.
@@ -156,7 +158,10 @@ public final class Follow {
 			hero.cameraAngles.y(), hero.cameraAngles.x(), v.x(), v.y(), v.z()), localNow);
 		if (hero.tick != lastLookTick) {
 			lastLookTick = hero.tick;
-			look.addSample(timeline.localTime(hero.serverTime), hero.cameraAngles.y(), hero.cameraAngles.x());
+			// When it reached us: its tick's slot on the server clock, but never before the previous frame,
+			// whose read didn't see it yet (a late server tick still carries input up to when it ran).
+			double arrived = Math.max(timeline.localTime(hero.serverTime), lastFrame > 0 ? lastFrame : localNow);
+			look.addSample(arrived, hero.cameraAngles.y(), hero.cameraAngles.x());
 		}
 		HeroTimeline.Pose pose = timeline.poseAt(localNow);
 		// Raw-mouse look while Deadlock has the input; Deadlock's own (delayed) angles otherwise.
@@ -210,6 +215,12 @@ public final class Follow {
 		return timeline.delay() * 1000;
 	}
 
+	static String timelineHudLine() {
+		int[] d = timeline.takeDryFrames();
+		return String.format("position drawn %.0f ms behind (%s), ran past the newest sample on %d of %d frames", timeline.delay() * 1000,
+			timeline.adaptive() ? "adaptive" : "fixed", d[0], d[1]);
+	}
+
 	static String lookHudLine() {
 		return rawLook ? look.hudLine() : "look: Deadlock's angles (raw mouse off)";
 	}
@@ -223,7 +234,7 @@ public final class Follow {
 		}
 		for (int serial = lastAbilitySerial + 1; Integer.compareUnsigned(serial, newest) <= 0; serial++) {
 			mapping.readAbilityEvent(serial).ifPresent(e -> {
-				if (abilitiesSeen.add(e.abilityName)) LOG.info("Deadcraft: ability event {}", e.abilityName);
+				LOG.info("Deadcraft: ability event {} (tick {})", e.abilityName, e.tick);
 				HeroRenderer.ability(e.abilityName);
 				if (e.abilityName.toLowerCase().contains("dash")) DeadlockCamera.dashKick();
 			});
@@ -253,6 +264,7 @@ public final class Follow {
 			mc.options.framerateLimit().get(), mc.options.enableVsync().get(), look.describe(), rawMouse.reports(),
 			String.format("%.2f", leadFrames == 0 ? 0 : leadSum / leadFrames), String.format("%.1f", leadMax));
 		LOG.info("Deadcraft: {}; top speed {} blocks/s", HeroRenderer.stats(), String.format("%.2f", speedMax));
+		LOG.info("Deadcraft: hud: {}", TestHud.lastLines());
 		speedMax = 0;
 		statsSince = now;
 		frameMax = frameSum = exportMax = leadSum = leadMax = 0;
@@ -394,7 +406,8 @@ public final class Follow {
 	}
 
 	static String delay(Float ms) {
-		if (ms != null) timeline.setDelay(ms / 1000.0);
+		if (ms != null && ms > 0) timeline.setDelay(ms / 1000.0);
+		else if (ms != null) timeline.setAdaptive();
 		return String.format("position delay %.0f ms behind Deadlock's newest sample (default %.0f).", timeline.delay() * 1000,
 			HeroTimeline.DELAY_S * 1000);
 	}

@@ -40,8 +40,22 @@ public final class DeadlockCamera {
 		return eyeHeight / Proto.UNITS_PER_BLOCK;
 	}
 
-	static void setEyeHeight(float units) {
-		if (units > 10f && units < 400f) eyeHeight = units;
+	/** Deadlock eases its camera when the eye height changes (crouch); so do we. */
+	private static final double EYE_EASE_S = 0.1;
+	private static float standingEye = 86f;
+	private static double lastEyeTime;
+
+	/**
+	 * Every linked frame: Deadlock's eye height for the hero (snaps on crouch), and whether the hero is
+	 * sliding (Deadlock keeps the eye up but its camera drops to crouch height for a slide).
+	 */
+	static void setEyeHeight(float units, boolean sliding, double now) {
+		if (units <= 10f || units >= 400f) return;
+		standingEye = Math.max(standingEye, units);
+		float target = sliding ? Math.min(units, standingEye * 0.64f) : units;  // crouch is 55 of 86 for Celeste
+		double dt = lastEyeTime == 0 ? 1 : Math.min(1, now - lastEyeTime);
+		lastEyeTime = now;
+		eyeHeight += (float) ((target - eyeHeight) * (1 - Math.exp(-dt / EYE_EASE_S)));
 	}
 
 	/** On link: third person (so the body is drawn) and Deadlock's field of view. Undone on unlink. */

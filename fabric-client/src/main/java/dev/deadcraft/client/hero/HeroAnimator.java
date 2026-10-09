@@ -16,6 +16,10 @@ public final class HeroAnimator {
 	static final float FADE_S = 0.15f;
 	/** Speed at which the run clips play at normal rate, blocks/s. */
 	static float runSpeed = 5f;
+	/** Deadlock's dash is a short burst; the clip's tail is a recovery to standing, which we skip. */
+	static final float DASH_MAX_S = 0.4f;
+	/** Body turn speed (degrees/s) at which standing feet fully step. */
+	static final float TURN_STEP_RATE = 240f;
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
@@ -29,7 +33,7 @@ public final class HeroAnimator {
 	private float runPhase;  // 0..1, shared by every direction so blends stay in step
 	private float[] previousPose;
 	private final float[] pose;
-	private float standingEye, eye, slideLowestEye;
+	private float standingEye, eye, slideLowestEye, slideEndedAt = -10, clock, turnRate, turnPhase;
 	private double speed;
 	private boolean grounded;
 	private String dashClip = "dash_ground", clipA = "", clipB = "";
@@ -44,6 +48,15 @@ public final class HeroAnimator {
 		return state;
 	}
 
+	public boolean sliding() {
+		return state == State.SLIDE;
+	}
+
+	/** How fast the drawn body is turning, degrees per second (positive: to its right). */
+	public void setTurnRate(float degreesPerSecond) {
+		turnRate = degreesPerSecond;
+	}
+
 	/** A Deadlock ability was used (from the plugin's event ring). Movement abilities start moves. */
 	public void ability(String name, Input in) {
 		String n = name.toLowerCase();
@@ -51,8 +64,15 @@ public final class HeroAnimator {
 			dashClip = in.grounded() ? "dash_ground" : "dash_air_" + airDirection(in);
 			start(State.DASH);
 		} else if (n.contains("slide")) {
-			slideLowestEye = in.eyeHeight();
-			start(State.SLIDE);
+			// Deadlock reports the slide again when it ends: a slide event during a slide (or just after
+			// one ended on its own) ends it rather than starting another.
+			if (move == State.SLIDE) {
+				move = null;
+				slideEndedAt = clock;
+			} else if (clock - slideEndedAt > 0.4f) {
+				slideLowestEye = in.eyeHeight();
+				start(State.SLIDE);
+			}
 		} else if (n.contains("mantle")) {
 			start(State.MANTLE);
 		} else if (n.contains("jump")) {
@@ -76,12 +96,17 @@ public final class HeroAnimator {
 	public float[] update(Input in, float dt) {
 		standingEye = Math.max(standingEye, in.eyeHeight());
 		eye = in.eyeHeight();
+		clock += dt;
+		turnPhase = (turnPhase + dt * Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 1.5f) % 1f;
 		grounded = in.grounded();
 		airTime = in.grounded() ? 0 : airTime + dt;
 		speed = Math.hypot(in.forward(), in.right());
 		if (state == State.SLIDE) slideLowestEye = Math.min(slideLowestEye, eye);
 		boolean crouched = standingEye > 0 && in.eyeHeight() < standingEye * 0.8f;
-		if (move != null && !moveContinues(in, speed)) move = null;
+		if (move != null && !moveContinues(in, speed)) {
+			if (move == State.SLIDE) slideEndedAt = clock;
+			move = null;
+		}
 		State next = move != null ? move : choose(in, speed, crouched);
 		if (next != state) enter(next);
 		stateTime += dt;
@@ -103,7 +128,7 @@ public final class HeroAnimator {
 
 	private boolean moveContinues(Input in, double speed) {
 		return switch (move) {
-			case DASH -> stateTime < clipDuration(dashClip);
+			case DASH -> stateTime < Math.min(DASH_MAX_S, clipDuration(dashClip));
 			case MANTLE -> stateTime < clipDuration("mantle_64");
 			// A slide lasts while the hero keeps sliding along the ground, and ends as soon as Deadlock
 			// stands the hero back up (the eye rises back to standing height after dipping).
@@ -127,8 +152,8 @@ public final class HeroAnimator {
 
 	private void sample(Input in) {
 		switch (state) {
-			case IDLE -> play("out_of_combat_stand_idle", stateTime);
-			case CROUCH_IDLE -> play("out_of_combat_crouch_idle", stateTime);
+			case IDLE -> idle("out_of_combat_stand_idle", "out_of_combat_run_");
+			case CROUCH_IDLE -> idle("out_of_combat_crouch_idle", "out_of_combat_crouch_run_");
 			case RUN -> directional("out_of_combat_run_", in);
 			case CROUCH_RUN -> directional("out_of_combat_crouch_run_", in);
 			case JUMP -> play("jump_ground", stateTime);
@@ -142,6 +167,17 @@ public final class HeroAnimator {
 				else play("slide_loop", stateTime - start);
 			}
 		}
+	}
+
+	/**
+	 * Standing still: the idle, with sideways steps blended in while the body turns on the spot
+	 * (Celeste has no standing turn clips; the strafe run at a slow phase reads as stepping round).
+	 */
+	private void idle(String idleClip, String runPrefix) {
+		float w = Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 0.7f;
+		HeroModel.Clip c = model.clips.get(idleClip);
+		if (c != null) model.accumulate(c, stateTime, 1 - w, pose);
+		if (w > 0) playPhase(runPrefix + (turnRate > 0 ? "e" : "w"), turnPhase, w);
 	}
 
 	/** The two run clips around the movement direction, blended by angle, at the shared phase. */

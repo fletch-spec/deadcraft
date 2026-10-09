@@ -95,6 +95,8 @@ final class RawMouse implements LookPredictor.Counts {
 		problem = "";
 		Thread t = new Thread(this::pump, "Deadcraft raw mouse");
 		t.setDaemon(true);
+		// Reports are timestamped when this thread reads them: don't let a busy render thread delay it.
+		t.setPriority(Thread.MAX_PRIORITY);
 		thread = t;
 		t.start();
 	}

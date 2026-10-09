@@ -45,12 +45,17 @@ final class TestHud {
 		windowStart = nowMs;
 		lines.clear();
 		lines.add(String.format("%.0f fps  frame %.2f ms avg, %.1f ms worst", frames / (frameSum / 1000), frameSum / Math.max(1, frames), frameMax));
-		lines.add(String.format("deadlock sample age %.1f ms avg, %.1f max; position drawn %.0f ms behind", ageSum / Math.max(1, ageSamples), ageMax,
-			Follow.positionDelayMs()));
+		lines.add(String.format("deadlock sample age %.1f ms avg, %.1f max", ageSum / Math.max(1, ageSamples), ageMax));
+		lines.add(Follow.timelineHudLine());
 		lines.add(Follow.lookHudLine());
 		lines.add(HeroRenderer.hudLine());
 		frames = ageSamples = 0;
 		frameSum = frameMax = ageSum = ageMax = 0;
+	}
+
+	/** The last refresh's lines, for the log. */
+	static String lastLines() {
+		return String.join(" | ", lines);
 	}
 
 	static void unlinked() {

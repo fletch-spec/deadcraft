@@ -32,7 +32,10 @@ public final class HeroRenderer {
 	/** glTF metres to Minecraft blocks: the export is Source units * 0.0254. */
 	private static final float BLOCKS_PER_METRE = 1f / 0.0254f / Proto.UNITS_PER_BLOCK;
 	/** Extra size on top of Deadlock's scale (1 = the hero's true size against Minecraft's blocks). */
-	private static float scale = 1f;
+	private static float scale = 1.2f;  // chosen by eye 2026-10-10
+	/** The drawn body's yaw eases after the camera's instead of snapping with every mouse movement. */
+	private static final float BODY_EASE_S = 0.07f;
+	private static float bodyYaw = Float.NaN;
 
 	private static String hero = "unicorn";
 	private static boolean enabled = true;
@@ -55,6 +58,10 @@ public final class HeroRenderer {
 	/** Called by Follow every frame while linked. Speeds in blocks per second, relative to facing. */
 	public static void setInput(HeroAnimator.Input in) {
 		input = in;
+	}
+
+	public static boolean sliding() {
+		return animator != null && animator.sliding();
 	}
 
 	/** A Deadlock ability was used: movement abilities start animation moves. */
@@ -120,6 +127,12 @@ public final class HeroRenderer {
 		float dt = lastNanos == 0 ? 0 : Math.min(0.1f, (now - lastNanos) / 1e9f);
 		lastNanos = now;
 		long t0 = now;
+		float target = state.bodyRot;
+		if (Float.isNaN(bodyYaw) || dt <= 0) bodyYaw = target;
+		float diff = ((target - bodyYaw) % 360 + 540) % 360 - 180;
+		float step = diff * (1 - (float) Math.exp(-dt / BODY_EASE_S));
+		bodyYaw += step;
+		animator.setTurnRate(dt > 0 ? step / dt : 0);
 		float[] matrices = animator.update(input, dt);
 		skin(matrices);
 		skinNanos += System.nanoTime() - t0;
@@ -127,7 +140,7 @@ public final class HeroRenderer {
 
 		poseStack.pushPose();
 		// The model faces glTF +Z; Minecraft's yaw 0 faces +Z (south) and turns clockwise seen from above.
-		poseStack.rotateDegrees(Axis.YP, -state.bodyRot);
+		poseStack.rotateDegrees(Axis.YP, -bodyYaw);
 		poseStack.scale(BLOCKS_PER_METRE * scale, BLOCKS_PER_METRE * scale, BLOCKS_PER_METRE * scale);
 		int light = state.lightCoords;
 		for (int i = 0; i < renderTypes.length; i++) {
