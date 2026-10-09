@@ -46,3 +46,7 @@ fabric-client/run/
 fabric-client/build/
 protocol/java/.gradle/
 protocol/java/build/
+
+# Exported hero models (tools/hero-export) are Valve assets too
+*.glb
+*.gltf
