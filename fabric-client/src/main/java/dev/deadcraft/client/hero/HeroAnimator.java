@@ -149,8 +149,10 @@ public final class HeroAnimator {
 			// Through the climb (Deadlock lowers the hull while climbing, so that says nothing yet); over
 			// on landing, into a slide or onto the ledge.
 			case MANTLE -> stateTime < MANTLE_MAX_S && !(in.grounded() && stateTime > 0.15f);
-			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f);
-			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded();
+			// A wall beside the hero takes over from a jump (Deadlock can bounce off it).
+			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f)
+				&& !(in.wall() != Wall.NONE && airTime > 0.15f);
+			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded() && !(in.wall() != Wall.NONE && airTime > 0.15f);
 			default -> false;
 		};
 	}

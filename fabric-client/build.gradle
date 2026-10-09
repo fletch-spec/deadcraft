@@ -15,6 +15,8 @@ loom {
 		client {
 			// The protocol binding opens the shared memory through kernel32 (Foreign Function API).
 			vmArgs '--enable-native-access=ALL-UNNAMED'
+			// Java Flight Recorder: where frame time goes (run/deadcraft.jfr, written on exit; ~2% overhead).
+			vmArgs '-XX:StartFlightRecording=filename=deadcraft.jfr,settings=profile,dumponexit=true,maxage=30m'
 			programArgs '--username', 'DeadcraftDev'
 		}
 	}
