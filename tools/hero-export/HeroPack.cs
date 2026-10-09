@@ -9,24 +9,27 @@ namespace Deadcraft.HeroExport;
 
 /// <summary>
 /// Packs an exported hero .glb into the small file the Minecraft client draws (format below, read by
-/// fabric-client's HeroModel). One simplified mesh, the animation clips the client uses baked to
-/// skinning matrices at a fixed rate, and one downscaled texture per material, written beside it.
+/// fabric-client's HeroModel). One simplified mesh, the skeleton, the animation clips the client uses
+/// as each joint's local transform at a fixed rate (so the client blends per joint and can add layers,
+/// such as the upper body turning to the camera), and one downscaled texture per material beside it.
 ///
 /// <code>
-/// "DCHM" int32 version=1
+/// "DCHM" int32 version=2
 /// int32 materials; per material: string name, string texture file (beside the pack, or "")
 /// int32 vertices; per vertex: float3 position (metres, glTF axes), float3 normal, float2 uv,
-///                 uint32 colour (RGBA8), uint16x4 joints (packed joint index), float4 weights
+///                 uint32 colour (RGBA8), uint16x4 joints (skinned joint index), float4 weights
 /// per material: int32 triangles, int32x3 indices each
-/// int32 joints
+/// int32 nodes; per node, parents first: string name, int32 parent (-1 for none),
+///                 rest pose float10 (translation xyz, rotation quaternion xyzw, scale xyz)
+/// int32 skinned joints; per joint: int32 node, float12 inverse bind (3x4 rows: x' = row0 . (x, y, z, 1), ...)
 /// int32 clips; per clip: string name, float fps, int32 frames, byte loop,
-///                 frames x joints x float12 (3x4 rows: x' = row0 . (x, y, z, 1), ...)
+///                 frames x nodes x float10 (each node's local transform, as the rest pose)
 /// </code>
 /// Strings are int32 byte length + UTF-8. Little-endian throughout.
 /// </summary>
 internal static class HeroPack
 {
-	public const int Version = 1;
+	public const int Version = 2;
 	private const float Fps = 30f;
 	private const int TextureMax = 1024;
 
@@ -145,15 +148,40 @@ internal static class HeroPack
 			textureFiles.Add(file);
 		}
 
-		// ---- animations: skinning matrices per packed joint, sampled at Fps ----
+		// ---- skeleton: every joint the skins use and their ancestors, parents before children ----
+		var armature = instance.Armature;
+		var skinOf = drawables.Select(dr => model.LogicalNodes.First(n => n.Name == dr.Template.NodeName).Skin).ToArray();
+		var wanted = new HashSet<int>();
+		foreach (var (d, j) in jointIds.Keys)
+		{
+			for (var n = skinOf[d].GetJoint(j).Joint; n != null; n = n.VisualParent) wanted.Add(n.LogicalIndex);
+		}
+		int Depth(int logical)
+		{
+			int k = 0;
+			for (var n = model.LogicalNodes[logical].VisualParent; n != null; n = n.VisualParent) k++;
+			return k;
+		}
+		var nodes = wanted.OrderBy(Depth).ThenBy(i => i).ToList();
+		var nodeIndex = nodes.Select((logical, i) => (logical, i)).ToDictionary(p => p.logical, p => p.i);
+		var parents = nodes.Select(l => model.LogicalNodes[l].VisualParent is { } p && nodeIndex.TryGetValue(p.LogicalIndex, out int pi) ? pi : -1).ToArray();
+		var skinTable = new (int Node, Matrix4x4 InverseBind)[jointIds.Count];
+		foreach (var ((d, j), id) in jointIds)
+		{
+			var (joint, inverseBind) = skinOf[d].GetJoint(j);
+			skinTable[id] = (nodeIndex[joint.LogicalIndex], inverseBind);
+		}
+		armature.SetPoseTransforms();
+		var rest = nodes.Select(l => Decompose(armature.LogicalNodes[l].LocalMatrix)).ToArray();
 		// Clips carry their own travel on the root_motion joint (a dash moves the body forward). The real
-		// movement comes from Deadlock, so every frame is moved back by root_motion's travel.
-		var tracks = instance.Armature.AnimationTracks;
-		var rootNode = instance.Armature.LogicalNodes.FirstOrDefault(n => n.Name == "root_motion");
-		instance.Armature.SetPoseTransforms();
-		var rootRest = rootNode?.ModelMatrix ?? Matrix4x4.Identity;
-		Console.WriteLine(rootNode == null ? "pack: no root_motion joint; clips keep their travel" : "pack: removing root motion");
-		var clipData = new List<(string Name, bool Loop, int Frames, float[] Matrices)>();
+		// movement comes from Deadlock, so root_motion keeps its rest position (its turn stays).
+		int rootMotion = nodes.FindIndex(l => model.LogicalNodes[l].Name == "root_motion");
+		Console.WriteLine($"pack: skeleton {nodes.Count} nodes, {skinTable.Length} skinned joints" + (rootMotion < 0 ? ", no root_motion joint" : ""));
+
+		// ---- animations: each node's local translation, rotation and scale, sampled at Fps ----
+		var tracks = armature.AnimationTracks;
+		var clipData = new List<(string Name, bool Loop, int Frames, float[] Locals)>();
+		double worstCheck = 0;
 		foreach (var (clipName, loop) in Clips)
 		{
 			int track = -1;
@@ -166,32 +194,19 @@ internal static class HeroPack
 			}
 			float duration = tracks[track].Duration;
 			int frames = Math.Max(1, (int)Math.Round(duration * Fps) + (loop ? 0 : 1));
-			var m = new float[frames * jointIds.Count * 12];
+			var locals = new float[frames * nodes.Count * 10];
 			for (int f = 0; f < frames; f++)
 			{
-				instance.Armature.SetAnimationFrame(track, Math.Min(duration, f / Fps), loop);
-				var posed = instance.ToArray();  // enumerating refreshes the drawables' transforms
-				var cancel = Matrix4x4.Identity;
-				if (rootNode != null)
-				{
-					// Travel only; the root's turn stays (Deadlock supplies every position change, mantles included).
-					var travel = rootNode.ModelMatrix.Translation - rootRest.Translation;
-					cancel = Matrix4x4.CreateTranslation(-travel);
-				}
-				foreach (var ((d, j), id) in jointIds)
-				{
-					var skin = (SkinnedTransform)posed[d].Transform;
-					var x = skin.SkinMatrices[j] * cancel;  // row vectors: skin first, then the correction
-					int o = (f * jointIds.Count + id) * 12;
-					// System.Numerics is row-vector (v * M): rows of the 3x4 are M's columns.
-					m[o] = x.M11; m[o + 1] = x.M21; m[o + 2] = x.M31; m[o + 3] = x.M41;
-					m[o + 4] = x.M12; m[o + 5] = x.M22; m[o + 6] = x.M32; m[o + 7] = x.M42;
-					m[o + 8] = x.M13; m[o + 9] = x.M23; m[o + 10] = x.M33; m[o + 11] = x.M43;
-				}
+				armature.SetAnimationFrame(track, Math.Min(duration, f / Fps), loop);
+				var local = nodes.Select(l => Decompose(armature.LogicalNodes[l].LocalMatrix)).ToArray();
+				if (f == 0) worstCheck = Math.Max(worstCheck, Check(local, instance.ToArray()));
+				if (rootMotion >= 0) local[rootMotion].T = rest[rootMotion].T;
+				for (int n = 0; n < nodes.Count; n++) Put(locals, (f * nodes.Count + n) * 10, local[n]);
 			}
-			clipData.Add((clipName, loop, frames, m));
+			clipData.Add((clipName, loop, frames, locals));
 		}
-		Console.WriteLine($"pack: {clipData.Count} clips, {clipData.Sum(c => c.Frames)} frames");
+		Console.WriteLine($"pack: {clipData.Count} clips, {clipData.Sum(c => c.Frames)} frames; rebuilt skinning differs from the exporter's by at most {worstCheck:E1}");
+		if (worstCheck > 1e-3) throw new InvalidOperationException("skeleton rebuild doesn't match the exporter's skinning; refusing to write a broken pack");
 
 		// ---- write ----
 		using var w = new BinaryWriter(File.Create(outPath));
@@ -219,15 +234,30 @@ internal static class HeroPack
 			w.Write(tris.Count / 3);
 			foreach (int i in tris) w.Write(i);
 		}
-		w.Write(jointIds.Count);
+		w.Write(nodes.Count);
+		var restFloats = new float[10];
+		for (int n = 0; n < nodes.Count; n++)
+		{
+			Str(model.LogicalNodes[nodes[n]].Name ?? "");
+			w.Write(parents[n]);
+			Put(restFloats, 0, rest[n]);
+			foreach (float f in restFloats) w.Write(f);
+		}
+		w.Write(skinTable.Length);
+		foreach (var (node, ib) in skinTable)
+		{
+			w.Write(node);
+			// System.Numerics is row-vector (v * M): rows of the 3x4 are M's columns.
+			foreach (float f in new[] { ib.M11, ib.M21, ib.M31, ib.M41, ib.M12, ib.M22, ib.M32, ib.M42, ib.M13, ib.M23, ib.M33, ib.M43 }) w.Write(f);
+		}
 		w.Write(clipData.Count);
-		foreach (var (name, loop, frames, m) in clipData)
+		foreach (var (name, loop, frames, locals) in clipData)
 		{
 			Str(name);
 			w.Write(Fps);
 			w.Write(frames);
 			w.Write((byte)(loop ? 1 : 0));
-			foreach (float f in m) w.Write(f);
+			foreach (float f in locals) w.Write(f);
 		}
 		Console.WriteLine($"pack: wrote {outPath} ({w.BaseStream.Length / 1024} KiB)");
 
@@ -237,6 +267,47 @@ internal static class HeroPack
 			w.Write(bytes.Length);
 			w.Write(bytes);
 		}
+
+		// Rebuilds skinning matrices from the locals, as the Minecraft client will, and compares them with
+		// the exporter's own: the largest difference in any matrix element.
+		double Check(Trs[] local, DrawableInstance[] posed)
+		{
+			var world = new Matrix4x4[nodes.Count];
+			for (int n = 0; n < nodes.Count; n++)
+			{
+				var m = Matrix4x4.CreateScale(local[n].S) * Matrix4x4.CreateFromQuaternion(local[n].R) * Matrix4x4.CreateTranslation(local[n].T);
+				world[n] = parents[n] < 0 ? m : m * world[parents[n]];
+			}
+			double worst = 0;
+			foreach (var ((d, j), id) in jointIds)
+			{
+				var mine = skinTable[id].InverseBind * world[skinTable[id].Node];
+				var theirs = ((SkinnedTransform)posed[d].Transform).SkinMatrices[j];
+				for (int r = 0; r < 4; r++)
+					for (int c = 0; c < 3; c++) worst = Math.Max(worst, Math.Abs(mine[r, c] - theirs[r, c]));
+			}
+			return worst;
+		}
+	}
+
+	private struct Trs
+	{
+		public Vector3 T, S;
+		public Quaternion R;
+	}
+
+	private static Trs Decompose(Matrix4x4 m)
+	{
+		if (!Matrix4x4.Decompose(m, out var s, out var r, out var t)) (s, r, t) = (Vector3.One, Quaternion.Identity, m.Translation);
+		return new Trs { T = t, R = Quaternion.Normalize(r), S = s };
+	}
+
+	// T xyz, R xyzw, S xyz.
+	private static void Put(float[] a, int o, Trs x)
+	{
+		a[o] = x.T.X; a[o + 1] = x.T.Y; a[o + 2] = x.T.Z;
+		a[o + 3] = x.R.X; a[o + 4] = x.R.Y; a[o + 5] = x.R.Z; a[o + 6] = x.R.W;
+		a[o + 7] = x.S.X; a[o + 8] = x.S.Y; a[o + 9] = x.S.Z;
 	}
 
 	private static uint Rgba(Vector4 c) =>

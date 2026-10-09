@@ -1,14 +1,16 @@
 package dev.deadcraft.client.hero;
 
-import java.util.Arrays;
-
 /**
  * Picks and blends the hero's clips, standing in for Deadlock's own animation graph. Continuous
  * states come from the hero's motion: idle, eight-way run (crouched or not) with the play rate
  * following the speed, fall, and slide (read from the hero's state: Deadlock lowers the collision
  * hull for both a crouch and a slide, but only a crouch lowers the eye). One-shot moves come from
  * Deadlock's movement ability events (dash, mantle, jump and air jump), which say exactly when they
- * start. A new state fades in over {@link #FADE_S}.
+ * start, and from the motion (landing, stopping). A new state fades in over {@link #FADE_S}.
+ *
+ * <p>Clips blend per joint ({@link HeroModel.Pose}); on top, the upper body turns towards where the
+ * camera looks ({@link #setLook}), spread from the lower spine to the head, as Deadlock's heroes do
+ * before their feet follow.
  */
 public final class HeroAnimator {
 	/** One frame of what the hero is doing. Speeds in blocks per second, relative to facing. */
@@ -29,36 +31,60 @@ public final class HeroAnimator {
 	static final float MANTLE_RATE = 1.4f, MANTLE_MAX_S = 0.8f;
 	/** A crouch (eye at crouch height) must hold this long: the eye dips for a tick as a slide ends. */
 	static final float CROUCH_ENTER_S = 0.06f;
+	static final float SLIDE_ENTER_S = 0.03f;
 	/** Run/idle switching with a margin, so speeds near the line don't flicker between the two. */
 	static final double MOVE_START = 0.5, MOVE_STOP = 0.2;
 	/** Body turn speed (degrees/s) at which standing feet fully step. */
 	static final float TURN_STEP_RATE = 240f;
+	/** A fall this long lands with an impact; a run this fast stops with a skid. */
+	static final float LAND_AFTER_S = 0.45f, STOP_FROM_SPEED = 3f;
+	/** The upper body turns at most this far from the feet, degrees. */
+	static final float LOOK_LIMIT = 75f;
+	/** Shares of the upper-body turn, lower spine to head (Celeste's joint names). */
+	private static final String[] LOOK_NODES = {"spine_1", "spine_2", "spine_3", "neck_0", "head"};
+	private static final float[] LOOK_SHARES = {0.15f, 0.2f, 0.2f, 0.2f, 0.25f};
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
-	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, AIR_JUMP, FALL, SLIDE, DASH, MANTLE, WALL }
+	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, AIR_JUMP, FALL, SLIDE, DASH, MANTLE, WALL, LAND, STOP }
 
 	private final HeroModel model;
+	private final HeroModel.Pose pose, previous, shown;
+	private final float[] world, skin;
+	private final int[] lookNodes;
+	private final float[] lookShares;
 	private State state = State.IDLE;
-	/** A move started by an ability event, held until it ends. */
+	/** A move started by an ability event or the motion, held until it ends. */
 	private State move;
 	private float stateTime, fade = 1, airTime, fadeTime = FADE_S;
 	private float runPhase;  // 0..1, shared by every direction so blends stay in step
-	private float[] previousPose;
-	private final float[] pose;
-	private float standingEye, eye, slideEndedAt = -10, clock, turnRate, turnPhase, standingHull, hull;
+	private float standingEye, eye, clock, turnRate, turnPhase, standingHull, hull, look, recentSpeed;
 	/** How long the hero's state has said "sliding" (hull down, eye up); a tick's flicker isn't a slide. */
 	private float slideStateTime, crouchStateTime;
 	private Wall wallSide = Wall.NONE;
-	static final float SLIDE_ENTER_S = 0.03f;
 	private double speed;
 	private boolean grounded;
-	private String dashClip = "dash_ground", clipA = "", clipB = "";
+	private String dashClip = "dash_ground", mantleClip = "mantle_64", clipA = "", clipB = "";
 	private float blend;
 
 	public HeroAnimator(HeroModel model) {
 		this.model = model;
-		pose = new float[model.jointCount * 12];
+		pose = model.newPose();
+		previous = model.newPose();
+		shown = model.newPose();
+		world = new float[model.nodeCount() * 12];
+		skin = new float[model.skinnedJointCount() * 12];
+		int found = 0;
+		int[] nodes = new int[LOOK_NODES.length];
+		float[] shares = new float[LOOK_NODES.length];
+		for (int i = 0; i < LOOK_NODES.length; i++) {
+			int n = model.node(LOOK_NODES[i]);
+			if (n < 0) continue;
+			nodes[found] = n;
+			shares[found++] = LOOK_SHARES[i];
+		}
+		lookNodes = java.util.Arrays.copyOf(nodes, found);
+		lookShares = java.util.Arrays.copyOf(shares, found);
 	}
 
 	public State state() {
@@ -74,13 +100,24 @@ public final class HeroAnimator {
 		turnRate = degreesPerSecond;
 	}
 
-	/** A Deadlock ability was used (from the plugin's event ring). Movement abilities start moves. */
-	public void ability(String name, Input in) {
+	/** Where the camera looks relative to the drawn body, degrees (Minecraft yaw: positive to the right). */
+	public void setLook(float degrees) {
+		look = Math.max(-LOOK_LIMIT, Math.min(LOOK_LIMIT, degrees));
+	}
+
+	/**
+	 * A Deadlock ability was used (from the plugin's event ring). Movement abilities start moves.
+	 * {@code ledgeBlocks}: for a mantle, how high the ledge in front is above the feet (NaN if unknown).
+	 */
+	public void ability(String name, Input in, double ledgeBlocks) {
 		String n = name.toLowerCase();
 		if (n.contains("dash")) {
 			dashClip = in.grounded() ? "dash_ground" : "dash_air_" + airDirection(in);
 			start(State.DASH);
 		} else if (n.contains("mantle")) {
+			// Celeste has climbs for 32, 64, 96 and 128 units: half a block to two blocks.
+			int units = Double.isNaN(ledgeBlocks) ? 64 : (int) Math.max(32, Math.min(128, Math.round(ledgeBlocks * 2) * 32));
+			mantleClip = "mantle_" + units;
 			start(State.MANTLE);
 		} else if (n.contains("jump")) {
 			start(in.grounded() || airTime < 0.25f ? State.JUMP : State.AIR_JUMP);
@@ -93,10 +130,10 @@ public final class HeroAnimator {
 	}
 
 	private void enter(State next) {
-		HeroRenderer.LOG.info("Deadcraft: anim {} -> {} after {} s (speed {} b/s, {}, eye {}, hull {})", state, next,
+		HeroRenderer.LOG.info("Deadcraft: anim {} -> {} after {} s (speed {} b/s, {}, eye {}, hull {}){}", state, next,
 			String.format("%.2f", stateTime), String.format("%.1f", speed), grounded ? "ground" : "air", String.format("%.0f", eye),
-			String.format("%.0f", hull));
-		previousPose = pose.clone();
+			String.format("%.0f", hull), next == State.MANTLE ? " " + mantleClip : "");
+		previous.copyFrom(shown);
 		state = next;
 		stateTime = 0;
 		fade = 0;
@@ -104,7 +141,7 @@ public final class HeroAnimator {
 		fadeTime = next == State.WALL ? 0.3f : FADE_S;
 	}
 
-	/** Advances by {@code dt} seconds and returns the skinning matrices (jointCount * 12). */
+	/** Advances by {@code dt} seconds and returns the skinning matrices (skinned joints * 12). */
 	public float[] update(Input in, float dt) {
 		standingEye = Math.max(standingEye, in.eyeHeight());
 		eye = in.eyeHeight();
@@ -112,21 +149,28 @@ public final class HeroAnimator {
 		standingHull = Math.max(standingHull, hull);
 		clock += dt;
 		turnPhase = (turnPhase + dt * Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 1.5f) % 1f;
+		boolean landed = in.grounded() && !grounded;
+		float airTimeBefore = airTime;
 		grounded = in.grounded();
 		airTime = in.grounded() ? 0 : airTime + dt;
 		speed = Math.hypot(in.forward(), in.right());
+		recentSpeed = (float) Math.max(speed, recentSpeed * Math.exp(-dt / 0.2));
 		boolean slideState = standingHull > 0 && hull < standingHull * 0.75f && eye >= standingEye * 0.9f;
 		slideStateTime = slideState ? slideStateTime + dt : 0;
 		boolean crouchState = standingEye > 0 && eye < standingEye * 0.8f;
 		crouchStateTime = crouchState ? crouchStateTime + dt : 0;
 		boolean wasCrouched = state == State.CROUCH_IDLE || state == State.CROUCH_RUN;
 		boolean crouched = crouchStateTime > 0 && (wasCrouched || crouchStateTime >= CROUCH_ENTER_S);
-		if (move != null && !moveContinues(in, speed)) {
-			if (move == State.SLIDE) slideEndedAt = clock;
-			move = null;
+		if (move != null && !moveContinues(in, speed)) move = null;
+		if (move == null && landed && airTimeBefore > LAND_AFTER_S && speed < 2 && !slideState && !crouched) {
+			start(State.LAND);
 		}
 		Wall wallBefore = wallSide;
 		State next = move != null ? move : choose(in, speed, crouched);
+		if (move == null && state == State.RUN && next == State.IDLE && recentSpeed > STOP_FROM_SPEED) {
+			start(State.STOP);
+			next = State.STOP;
+		}
 		if (next != state || next == State.WALL && wallSide != wallBefore) enter(next);
 		stateTime += dt;
 		fade = Math.min(1, fade + dt / fadeTime);
@@ -136,13 +180,14 @@ public final class HeroAnimator {
 			if (c != null) runPhase = (runPhase + dt * rate / c.duration()) % 1f;
 		}
 
-		Arrays.fill(pose, 0);
+		pose.clear();
 		sample(in);
-		if (fade < 1 && previousPose != null) {
-			float a = smooth(fade);
-			for (int i = 0; i < pose.length; i++) pose[i] = previousPose[i] * (1 - a) + pose[i] * a;
-		}
-		return pose;
+		pose.finish();
+		shown.copyFrom(previous);
+		shown.blendTowards(pose, fade < 1 ? smooth(fade) : 1);
+		// Model space turns the other way round from Minecraft's yaw (the renderer turns by -yaw).
+		model.skin(shown, world, (float) -Math.toRadians(look), lookNodes, lookShares, skin);
+		return skin;
 	}
 
 	private boolean moveContinues(Input in, double speed) {
@@ -155,6 +200,9 @@ public final class HeroAnimator {
 			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f)
 				&& !(in.wall() != Wall.NONE && airTime > 0.15f);
 			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded() && !(in.wall() != Wall.NONE && airTime > 0.15f);
+			// Short: an impact or a skid, cut the moment the hero moves off again.
+			case LAND -> stateTime < Math.min(0.4f, clipDuration("landing_impact_idle")) && in.grounded() && speed < 1.5;
+			case STOP -> stateTime < Math.min(0.45f, clipDuration("run_to_stop_stand")) && in.grounded() && speed < MOVE_START;
 			default -> false;
 		};
 	}
@@ -187,9 +235,11 @@ public final class HeroAnimator {
 			case JUMP -> play("jump_ground", stateTime);
 			case AIR_JUMP -> play("jump_air", stateTime);
 			case FALL -> play("in_air_loop_down", stateTime);
-			case MANTLE -> play("mantle_64", stateTime * MANTLE_RATE);
+			case MANTLE -> play(mantleClip, stateTime * MANTLE_RATE);
 			case WALL -> play("wall_attach_" + wallSide.name().toLowerCase(), stateTime * 0.7f);
 			case DASH -> play(dashClip, stateTime);
+			case LAND -> play("landing_impact_idle", stateTime);
+			case STOP -> play("run_to_stop_stand", stateTime);
 			case SLIDE -> {
 				float start = clipDuration("slide_start");
 				if (stateTime < start) play("slide_start", stateTime);
@@ -205,7 +255,7 @@ public final class HeroAnimator {
 	private void idle(String idleClip, String runPrefix) {
 		float w = Math.min(1f, Math.abs(turnRate) / TURN_STEP_RATE) * 0.7f;
 		HeroModel.Clip c = model.clips.get(idleClip);
-		if (c != null) model.accumulate(c, stateTime, 1 - w, pose);
+		if (c != null) pose.add(c, stateTime, 1 - w);
 		if (w > 0) playPhase(runPrefix + (turnRate > 0 ? "e" : "w"), turnPhase, w);
 	}
 
@@ -232,12 +282,12 @@ public final class HeroAnimator {
 	private void play(String clip, float time) {
 		HeroModel.Clip c = model.clips.get(clip);
 		if (c == null) c = model.clips.get("out_of_combat_stand_idle");
-		if (c != null) model.accumulate(c, time, 1, pose);
+		if (c != null) pose.add(c, time, 1);
 	}
 
 	private void playPhase(String clip, float phase, float weight) {
 		HeroModel.Clip c = model.clips.get(clip);
-		if (c != null) model.accumulate(c, phase * c.duration(), weight, pose);
+		if (c != null) pose.add(c, phase * c.duration(), weight);
 	}
 
 	private float clipDuration(String clip) {
@@ -251,8 +301,8 @@ public final class HeroAnimator {
 
 	/** For the test HUD. */
 	public String hudLine() {
-		return String.format("anim: %s%s  speed %.1f b/s  %s  eye %.0f/%.0f  hull %.0f/%.0f", state, state == State.DASH ? " " + dashClip : "", speed,
-			grounded ? "ground" : "air", eye, standingEye, hull, standingHull);
+		return String.format("anim: %s%s  speed %.1f b/s  %s  eye %.0f/%.0f  hull %.0f/%.0f  look %.0f", state,
+			state == State.DASH ? " " + dashClip : "", speed, grounded ? "ground" : "air", eye, standingEye, hull, standingHull, look);
 	}
 
 	public String describe() {

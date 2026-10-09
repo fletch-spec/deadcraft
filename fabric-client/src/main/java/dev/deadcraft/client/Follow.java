@@ -240,6 +240,30 @@ public final class Follow {
 		return HeroAnimator.Wall.NONE;
 	}
 
+	/**
+	 * How high the ledge just in front of the player is above their feet, in blocks (NaN if none within
+	 * two and a half blocks): the top of the solid run of blocks directly ahead, from Minecraft's own world.
+	 */
+	private static double ledgeAhead() {
+		Minecraft mc = Minecraft.getInstance();
+		LocalPlayer player = mc.player;
+		if (player == null || mc.level == null) return Double.NaN;
+		double yaw = Math.toRadians(player.yBodyRot);
+		double x = player.getX() - Math.sin(yaw) * 0.7, z = player.getZ() + Math.cos(yaw) * 0.7, feet = player.getY();
+		double top = Double.NaN;
+		for (int k = 0; k <= 3; k++) {
+			BlockPos pos = BlockPos.containing(x, feet + k, z);
+			VoxelShape shape = mc.level.getBlockState(pos).getCollisionShape(mc.level, pos);
+			if (shape.isEmpty()) {
+				if (!Double.isNaN(top)) break;  // the first gap above a solid run: the ledge's top
+				continue;
+			}
+			top = pos.getY() + shape.max(Direction.Axis.Y);
+		}
+		double height = top - feet;
+		return height > 0.1 && height <= 2.5 ? height : Double.NaN;
+	}
+
 	/** New entries in the plugin's ability ring since the last frame. */
 	private static void readAbilities(HeroState hero) {
 		int newest = hero.abilityEventSerial;
@@ -250,7 +274,7 @@ public final class Follow {
 		for (int serial = lastAbilitySerial + 1; Integer.compareUnsigned(serial, newest) <= 0; serial++) {
 			mapping.readAbilityEvent(serial).ifPresent(e -> {
 				LOG.info("Deadcraft: ability event {} (tick {})", e.abilityName, e.tick);
-				HeroRenderer.ability(e.abilityName);
+				HeroRenderer.ability(e.abilityName, e.abilityName.contains("mantle") ? ledgeAhead() : Double.NaN);
 				if (e.abilityName.toLowerCase().contains("dash")) DeadlockCamera.dashKick();
 			});
 		}

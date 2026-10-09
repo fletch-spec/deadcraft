@@ -73,8 +73,8 @@ public final class HeroRenderer {
 	}
 
 	/** A Deadlock ability was used: movement abilities start animation moves. */
-	public static void ability(String name) {
-		if (animator != null) animator.ability(name, input);
+	public static void ability(String name, double ledgeBlocks) {
+		if (animator != null) animator.ability(name, input, ledgeBlocks);
 	}
 
 	/** True when this player should be drawn as the hero (the pack loaded). */
@@ -122,7 +122,7 @@ public final class HeroRenderer {
 			problem = "";
 			int tris = m.materials.stream().mapToInt(x -> x.indices().length / 3).sum();
 			LOG.info("Deadcraft: hero model {} loaded: {} vertices, {} triangles, {} joints, {} clips, in {} ms", hero,
-				m.vertexCount(), tris, m.jointCount, m.clips.size(), (System.nanoTime() - t0) / 1_000_000);
+				m.vertexCount(), tris, m.skinnedJointCount(), m.clips.size(), (System.nanoTime() - t0) / 1_000_000);
 		} catch (Exception e) {
 			problem = "can't load " + file + ": " + e;
 			LOG.warn("Deadcraft: hero model: {}", problem, e);
@@ -158,6 +158,8 @@ public final class HeroRenderer {
 			bodyYawSpeed = 0;
 		}
 		animator.setTurnRate(bodyYawSpeed);
+		// The upper body turns towards the camera ahead of the feet.
+		animator.setLook(((target - bodyYaw) % 360 + 540) % 360 - 180);
 		float[] matrices = animator.update(input, dt);
 		skin(matrices);
 		skinNanos += System.nanoTime() - t0;
