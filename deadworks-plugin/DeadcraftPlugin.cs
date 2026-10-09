@@ -51,6 +51,16 @@ public class DeadcraftPlugin : DeadworksPluginBase
 
 	public override void OnPrecacheResources() => Precache.AddResource(ColliderPool.Model);
 
+	// The void map has no baked light: turn on fullbright for each player's client as their hero spawns
+	// (a cheat convar; sv_cheats is on for this map).
+	public override void OnPawnHeroInitialized(CCitadelPlayerPawn pawn)
+	{
+		if (Server.MapName != VoidMap || pawn.IsBot || pawn.Controller == null) return;
+		Server.ExecuteCommand("sv_cheats 1");
+		Server.ClientCommand(pawn.Controller.Slot, "mat_fullbright 1");
+		Log($"mat_fullbright 1 sent to slot {pawn.Controller.Slot}");
+	}
+
 	public override void OnUnload()
 	{
 		_colliders.Clear();
