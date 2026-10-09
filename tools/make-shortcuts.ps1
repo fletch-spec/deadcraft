@@ -1,7 +1,7 @@
-# Creates desktop shortcuts for a Deadcraft session:
-#   Deadcraft 1 - Server     the local Deadworks server on the void map (tools\run-server.ps1)
-#   Deadcraft 2 - Deadlock   Deadlock through Steam with -console +connect localhost:27067
-#   Deadcraft 3 - Minecraft  the dev Minecraft client (fabric-client runClient)
+# Creates desktop shortcuts for a Deadcraft session, run in order:
+#   Deadcraft 1 - Start the movement server   local Deadworks server on the void map (tools/run-server.ps1)
+#   Deadcraft 2 - Join with your hero         Deadlock through Steam, connecting to that server
+#   Deadcraft 3 - Show the Minecraft world    the dev Minecraft client, drawn over Deadlock
 # Fullbright is turned on by the plugin when your hero spawns on the void map.
 # Deadlock must be closed for shortcut 2: Steam only passes launch arguments to a fresh start.
 #   .\tools\make-shortcuts.ps1
@@ -11,6 +11,9 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -Name SteamExe).SteamExe -replace '/', '\'
 $deadlockAppId = 1422450
 $shell = New-Object -ComObject WScript.Shell
+# Shortcuts from earlier versions of this script
+'Deadcraft 1 - Server', 'Deadcraft 2 - Deadlock', 'Deadcraft 3 - Minecraft' |
+	ForEach-Object { Remove-Item (Join-Path $desktop "$_.lnk") -ErrorAction SilentlyContinue }
 
 function New-Shortcut($name, $target, $arguments, $workDir, $icon) {
 	$lnk = $shell.CreateShortcut((Join-Path $desktop "$name.lnk"))
@@ -22,10 +25,10 @@ function New-Shortcut($name, $target, $arguments, $workDir, $icon) {
 	Write-Host "Created $name"
 }
 
-New-Shortcut 'Deadcraft 1 - Server' "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
+New-Shortcut 'Deadcraft 1 - Start the movement server' "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
 	"-NoExit -ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void" $repo $null
-New-Shortcut 'Deadcraft 2 - Deadlock' $steam `
+New-Shortcut 'Deadcraft 2 - Join with your hero' $steam `
 	"-applaunch $deadlockAppId -console +connect localhost:27067" (Split-Path $steam) $steam
 # cmd /k strips the outermost pair of quotes, so the whole command line is wrapped in one more pair.
-New-Shortcut 'Deadcraft 3 - Minecraft' "$env:SystemRoot\System32\cmd.exe" `
+New-Shortcut 'Deadcraft 3 - Show the Minecraft world' "$env:SystemRoot\System32\cmd.exe" `
 	"/k `"`"$repo\fabric-client\gradlew.bat`" -p `"$repo\fabric-client`" runClient`"" "$repo\fabric-client" $null
