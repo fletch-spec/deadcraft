@@ -41,6 +41,16 @@ final class LookPredictor {
 	private final Counts counts;
 	private final double[] sxyYaw = new double[LAGS], sxxYaw = new double[LAGS];
 	private final double[] sxyPitch = new double[LAGS], sxxPitch = new double[LAGS];
+	// The gain is fitted again over quarter-second windows at each lag: Deadlock's tick-to-tick timing
+	// jitter only touches a window's ends, so these are far less noisy than the per-sample fit, which
+	// underestimates the gain (noise in the counts biases a least-squares slope towards zero).
+	private static final int WINDOW_SAMPLES = 16;
+	private static final double WINDOW_DECAY = 0.98;  // per window: ~12 s memory
+	private final double[] winDx = new double[LAGS], winDy = new double[LAGS];
+	private final double[] gxyYaw = new double[LAGS], gxxYaw = new double[LAGS], gxyPitch = new double[LAGS], gxxPitch = new double[LAGS];
+	private double winTurn, winPitch;
+	private int winSamples;
+	private boolean winValid = true, winPitchValid = true;
 	private double syyYaw, syyPitch;
 
 	private boolean havePrevious;
@@ -69,6 +79,9 @@ final class LookPredictor {
 		java.util.Arrays.fill(sxyPitch, 0);
 		java.util.Arrays.fill(sxxPitch, 0);
 		syyYaw = syyPitch = 0;
+		for (double[] a : new double[][] {winDx, winDy, gxyYaw, gxxYaw, gxyPitch, gxxPitch}) java.util.Arrays.fill(a, 0);
+		winTurn = winPitch = 0;
+		winSamples = 0;
 		lag = -1;
 		score = 0;
 	}
@@ -90,6 +103,8 @@ final class LookPredictor {
 			double dPitch = pitch - prevPitch;
 			if (dt < MAX_SAMPLE_GAP_S && Math.abs(turn) < MAX_SAMPLE_TURN && Math.abs(dPitch) < MAX_SAMPLE_TURN) {
 				fit(time, dt, turn, dPitch, Math.abs(pitch) < PITCH_LIMIT - 4 && Math.abs(prevPitch) < PITCH_LIMIT - 4);
+			} else {
+				winValid = false;
 			}
 		} else {
 			unwrappedYaw = yaw;
@@ -108,9 +123,15 @@ final class LookPredictor {
 			errorSum += error;
 			errorMax = Math.max(errorMax, error);
 			errorSamples++;
+			hudErrorSum += error;
+			hudErrorMax = Math.max(hudErrorMax, error);
+			hudSamples++;
 		}
 		if (!biasValid || gap > MAX_SAMPLE_GAP_S || error > SNAP_DEGREES) {
-			if (biasValid) snaps++;
+			if (biasValid) {
+				snaps++;
+				hudSnaps++;
+			}
 			biasYaw = mYaw;
 		} else {
 			biasYaw += (mYaw - biasYaw) * (1 - Math.exp(-gap / BIAS_TIME_S));
@@ -129,6 +150,18 @@ final class LookPredictor {
 	private double lastBiasTime;
 	private double errorSum, errorMax;
 	private int errorSamples, snaps;
+	private double hudErrorSum, hudErrorMax;
+	private int hudSamples, hudSnaps;
+
+	/** One line for the test HUD, covering the time since the last call. */
+	String hudLine() {
+		String s = lag < 0 ? String.format("look: learning (fit %.2f)", score)
+			: String.format("look: lag %d ms, gain %.4f, correction avg %.1f max %.1f deg, %d snaps", lag * LAG_STEP_MS, gainYaw,
+				hudSamples == 0 ? 0 : hudErrorSum / hudSamples, hudErrorMax, hudSnaps);
+		hudErrorSum = hudErrorMax = 0;
+		hudSamples = hudSnaps = 0;
+		return s;
+	}
 
 	/** The look to draw at local time {@code nanos}, or null when not calibrated yet. */
 	Look predict(long nanos) {
@@ -146,12 +179,34 @@ final class LookPredictor {
 			double shift = i * LAG_STEP_MS / 1000.0;
 			long[] a = counts.countsAt(nanos(time - dt - shift)), b = counts.countsAt(nanos(time - shift));
 			double dx = b[0] - a[0], dy = b[1] - a[1];
+			winDx[i] += dx;
+			winDy[i] += dy;
 			sxyYaw[i] = sxyYaw[i] * DECAY + dx * turn;
 			sxxYaw[i] = sxxYaw[i] * DECAY + dx * dx;
 			if (pitchUsable) {
 				sxyPitch[i] = sxyPitch[i] * DECAY + dy * dPitch;
 				sxxPitch[i] = sxxPitch[i] * DECAY + dy * dy;
 			}
+		}
+		winTurn += turn;
+		winPitch += dPitch;
+		if (!pitchUsable) winPitchValid = false;
+		if (++winSamples >= WINDOW_SAMPLES) {
+			for (int i = 0; i < LAGS; i++) {
+				if (winValid) {
+					gxyYaw[i] = gxyYaw[i] * WINDOW_DECAY + winDx[i] * winTurn;
+					gxxYaw[i] = gxxYaw[i] * WINDOW_DECAY + winDx[i] * winDx[i];
+				}
+				if (winValid && winPitchValid) {
+					gxyPitch[i] = gxyPitch[i] * WINDOW_DECAY + winDy[i] * winPitch;
+					gxxPitch[i] = gxxPitch[i] * WINDOW_DECAY + winDy[i] * winDy[i];
+				}
+			}
+			java.util.Arrays.fill(winDx, 0);
+			java.util.Arrays.fill(winDy, 0);
+			winTurn = winPitch = 0;
+			winSamples = 0;
+			winValid = winPitchValid = true;
 		}
 		if (syyYaw < MIN_TURN_VARIANCE) return;
 		int best = -1;
@@ -171,10 +226,12 @@ final class LookPredictor {
 		// calibration; the bias still pulls the camera onto Deadlock's angle every sample.
 		if (best < 0 || bestScore < MIN_SCORE) return;
 		lag = best;
-		gainYaw = sxyYaw[best] / sxxYaw[best];
+		// Windowed gain once a few windows of turning are in (counts squared: ~10 cm of mouse travel).
+		gainYaw = gxxYaw[best] > 1e6 ? gxyYaw[best] / gxxYaw[best] : sxyYaw[best] / sxxYaw[best];
 		// Pitch barely moved yet: Source uses the same degrees per count both ways (m_pitch = m_yaw),
 		// with mouse-down turning down (positive) while mouse-right turns yaw negative.
-		gainPitch = syyPitch > MIN_TURN_VARIANCE / 4 && sxxPitch[best] > 0 ? sxyPitch[best] / sxxPitch[best] : -gainYaw;
+		if (gxxPitch[best] > 1e6) gainPitch = gxyPitch[best] / gxxPitch[best];
+		else gainPitch = syyPitch > MIN_TURN_VARIANCE / 4 && sxxPitch[best] > 0 ? sxyPitch[best] / sxxPitch[best] : -gainYaw;
 	}
 
 	String describe() {

@@ -7,12 +7,15 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommands;
+import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 
 public final class DeadcraftClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		ClientTickEvents.END_CLIENT_TICK.register(Follow::clientTick);
+		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("deadcraft", "test_hud"), (graphics, delta) -> TestHud.draw(graphics));
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, context) -> dispatcher.register(
 			ClientCommands.literal("deadcraft")
 				.then(ClientCommands.literal("anchor").executes(c -> reply(c.getSource(), Follow.anchor())))
@@ -36,7 +39,10 @@ public final class DeadcraftClient implements ClientModInitializer {
 					.then(ClientCommands.argument("ms", FloatArgumentType.floatArg(0, 100))
 						.executes(c -> reply(c.getSource(), Follow.delay(FloatArgumentType.getFloat(c, "ms")))))
 					.executes(c -> reply(c.getSource(), Follow.delay(null))))
+				.then(ClientCommands.literal("hud").executes(c -> reply(c.getSource(), TestHud.toggle())))
 				.then(ClientCommands.literal("hero")
+					.then(ClientCommands.literal("scale").then(ClientCommands.argument("factor", FloatArgumentType.floatArg(0.25f, 4f))
+						.executes(c -> reply(c.getSource(), Follow.heroScale(FloatArgumentType.getFloat(c, "factor"))))))
 					.then(ClientCommands.argument("name", StringArgumentType.word())
 						.executes(c -> reply(c.getSource(), Follow.hero(StringArgumentType.getString(c, "name")))))
 					.executes(c -> reply(c.getSource(), Follow.hero(null))))

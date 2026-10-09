@@ -29,7 +29,9 @@ public final class HeroAnimator {
 	private float runPhase;  // 0..1, shared by every direction so blends stay in step
 	private float[] previousPose;
 	private final float[] pose;
-	private float standingEye;
+	private float standingEye, eye, slideLowestEye;
+	private double speed;
+	private boolean grounded;
 	private String dashClip = "dash_ground", clipA = "", clipB = "";
 	private float blend;
 
@@ -49,6 +51,7 @@ public final class HeroAnimator {
 			dashClip = in.grounded() ? "dash_ground" : "dash_air_" + airDirection(in);
 			start(State.DASH);
 		} else if (n.contains("slide")) {
+			slideLowestEye = in.eyeHeight();
 			start(State.SLIDE);
 		} else if (n.contains("mantle")) {
 			start(State.MANTLE);
@@ -72,8 +75,11 @@ public final class HeroAnimator {
 	/** Advances by {@code dt} seconds and returns the skinning matrices (jointCount * 12). */
 	public float[] update(Input in, float dt) {
 		standingEye = Math.max(standingEye, in.eyeHeight());
+		eye = in.eyeHeight();
+		grounded = in.grounded();
 		airTime = in.grounded() ? 0 : airTime + dt;
-		double speed = Math.hypot(in.forward(), in.right());
+		speed = Math.hypot(in.forward(), in.right());
+		if (state == State.SLIDE) slideLowestEye = Math.min(slideLowestEye, eye);
 		boolean crouched = standingEye > 0 && in.eyeHeight() < standingEye * 0.8f;
 		if (move != null && !moveContinues(in, speed)) move = null;
 		State next = move != null ? move : choose(in, speed, crouched);
@@ -99,8 +105,10 @@ public final class HeroAnimator {
 		return switch (move) {
 			case DASH -> stateTime < clipDuration(dashClip);
 			case MANTLE -> stateTime < clipDuration("mantle_64");
-			// A slide lasts while the hero keeps sliding along the ground.
-			case SLIDE -> stateTime < 0.25f || in.grounded() && speed > runSpeed * 0.4 && stateTime < 4f;
+			// A slide lasts while the hero keeps sliding along the ground, and ends as soon as Deadlock
+			// stands the hero back up (the eye rises back to standing height after dipping).
+			case SLIDE -> stateTime < 0.2f || in.grounded() && speed > runSpeed * 0.4 && stateTime < 4f
+				&& !(slideLowestEye < standingEye * 0.9f && in.eyeHeight() > standingEye * 0.95f);
 			case JUMP -> stateTime < clipDuration("jump_ground") && !(in.grounded() && stateTime > 0.2f);
 			case AIR_JUMP -> stateTime < clipDuration("jump_air") && !in.grounded();
 			default -> false;
@@ -174,6 +182,12 @@ public final class HeroAnimator {
 
 	private static float smooth(float x) {
 		return x * x * (3 - 2 * x);
+	}
+
+	/** For the test HUD. */
+	public String hudLine() {
+		return String.format("anim: %s%s  speed %.1f b/s  %s  eye %.0f/%.0f", state, state == State.DASH ? " " + dashClip : "", speed,
+			grounded ? "ground" : "air", eye, standingEye);
 	}
 
 	public String describe() {

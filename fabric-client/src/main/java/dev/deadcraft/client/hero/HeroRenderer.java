@@ -31,6 +31,8 @@ public final class HeroRenderer {
 	static final Logger LOG = LoggerFactory.getLogger("deadcraft");
 	/** glTF metres to Minecraft blocks: the export is Source units * 0.0254. */
 	private static final float BLOCKS_PER_METRE = 1f / 0.0254f / Proto.UNITS_PER_BLOCK;
+	/** Extra size on top of Deadlock's scale (1 = the hero's true size against Minecraft's blocks). */
+	private static float scale = 1f;
 
 	private static String hero = "unicorn";
 	private static boolean enabled = true;
@@ -121,11 +123,12 @@ public final class HeroRenderer {
 		float[] matrices = animator.update(input, dt);
 		skin(matrices);
 		skinNanos += System.nanoTime() - t0;
+		hudSkinNanos += System.nanoTime() - t0;
 
 		poseStack.pushPose();
 		// The model faces glTF +Z; Minecraft's yaw 0 faces +Z (south) and turns clockwise seen from above.
 		poseStack.rotateDegrees(Axis.YP, -state.bodyRot);
-		poseStack.scale(BLOCKS_PER_METRE, BLOCKS_PER_METRE, BLOCKS_PER_METRE);
+		poseStack.scale(BLOCKS_PER_METRE * scale, BLOCKS_PER_METRE * scale, BLOCKS_PER_METRE * scale);
 		int light = state.lightCoords;
 		for (int i = 0; i < renderTypes.length; i++) {
 			int[] indices = model.materials.get(i).indices();
@@ -134,6 +137,7 @@ public final class HeroRenderer {
 		}
 		poseStack.popPose();
 		frames++;
+		hudFrames++;
 	}
 
 	private static void skin(float[] m) {
@@ -193,11 +197,26 @@ public final class HeroRenderer {
 			}
 		}
 		emitNanos += System.nanoTime() - t0;
+		hudEmitNanos += System.nanoTime() - t0;
 	}
 
-	// ---- stats (Follow logs them every 10 s) ----
-	private static long skinNanos, emitNanos;
-	private static int frames;
+	// ---- stats (Follow logs them every 10 s; the HUD every second) ----
+	private static long skinNanos, emitNanos, hudSkinNanos, hudEmitNanos;
+	private static int frames, hudFrames;
+
+	public static String hudLine() {
+		if (model == null) return "hero: " + (problem.isEmpty() ? "off" : problem);
+		String s = animator.hudLine() + String.format("  |  hero %.2f ms skin + %.2f ms draw",
+			hudFrames == 0 ? 0 : hudSkinNanos / 1e6 / hudFrames, hudFrames == 0 ? 0 : hudEmitNanos / 1e6 / hudFrames);
+		hudSkinNanos = hudEmitNanos = 0;
+		hudFrames = 0;
+		return s;
+	}
+
+	public static String setScale(float s) {
+		scale = s;
+		return String.format("Hero scale %.2f (1 = true size against the blocks).", s);
+	}
 
 	public static String stats() {
 		if (model == null) return "hero model: " + (problem.isEmpty() ? "off" : problem);

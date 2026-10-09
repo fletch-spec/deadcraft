@@ -203,6 +203,15 @@ public final class Follow {
 			player.yBob = player.yBobO = yaw;
 		}
 		frameStats(mc, localNow);
+		TestHud.frame(localNow, (localNow - timeline.localTime(hero.serverTime)) * 1000);
+	}
+
+	static double positionDelayMs() {
+		return timeline.delay() * 1000;
+	}
+
+	static String lookHudLine() {
+		return rawLook ? look.hudLine() : "look: Deadlock's angles (raw mouse off)";
 	}
 
 	/** New entries in the plugin's ability ring since the last frame. */
@@ -338,6 +347,7 @@ public final class Follow {
 			mc.options.bobView().set(savedBobView);
 			DeadlockCamera.onLink(mc, false);
 			rawMouse.stop();
+			TestHud.unlinked();
 			status(mc, "Deadcraft: unlinked, vanilla movement" + (lastProblem.isEmpty() ? "" : " (" + lastProblem + ")"));
 		}
 		LOG.info("Deadcraft: {}", link ? "linked" : "unlinked " + lastProblem);
@@ -387,6 +397,10 @@ public final class Follow {
 		if (ms != null) timeline.setDelay(ms / 1000.0);
 		return String.format("position delay %.0f ms behind Deadlock's newest sample (default %.0f).", timeline.delay() * 1000,
 			HeroTimeline.DELAY_S * 1000);
+	}
+
+	static String heroScale(float s) {
+		return HeroRenderer.setScale(s);
 	}
 
 	static String hero(String name) {
