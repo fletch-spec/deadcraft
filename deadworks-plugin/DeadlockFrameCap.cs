@@ -5,17 +5,15 @@ namespace Deadcraft.Plugin;
 
 // While a player is on the Deadcraft server, their Deadlock only feeds input: Minecraft covers its
 // picture. Uncapped (fps_max 400 by default) it takes the GPU Minecraft needs. The cap is lowered
-// when the hero spawns on the Deadcraft map. Deadlock saves fps_max, so the player's own value is
-// remembered (read from their machine_convars.vcfg, on the same PC as this server, and kept in
-// %LOCALAPPDATA%\Deadcraft). A command sent as the client disconnects never arrives, so the restore for
-// normal play is a line in Deadlock's autoexec.cfg.
+// each time the hero comes alive on the Deadcraft map. Deadlock saves fps_max, and a command sent as the
+// client disconnects never arrives, so the player's normal cap comes back from a line in Deadlock's
+// autoexec.cfg (fps_max 400), run at every launch.
 //
 // The cap is a balance per PC: high enough that Deadlock reads input smoothly (30 felt sluggish),
 // low enough to leave Minecraft the GPU. Set it with the server cvar deadcraft_deadlock_fps_max.
 internal static class DeadlockFrameCap
 {
 	private const int DefaultCap = 122;  // felt right on the development PC (Minecraft ~350 fps moving)
-	private const int Fallback = 400;
 	private static ConVar? _cap;
 
 	public static void Register() =>
@@ -24,26 +22,18 @@ internal static class DeadlockFrameCap
 
 	public static int WhilePlaying() => _cap?.GetInt() is int v && v >= 30 ? v : DefaultCap;
 
-	private static string StateFile => Path.Combine(
-		Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deadcraft", "deadlock-fps_max.txt");
-
-	/// <summary>The player's own fps_max, to restore.</summary>
-	public static int Original(out string? problem)
+	/// <summary>The player's own fps_max from Deadlock's saved settings, for the log; null if unreadable.</summary>
+	public static int? Original(out string? problem)
 	{
 		problem = null;
 		try
 		{
-			if (File.Exists(StateFile) && int.TryParse(File.ReadAllText(StateFile).Trim(), out int saved)) return saved;
-			int fromConfig = ReadConfig() ?? Fallback;
-			if (fromConfig == WhilePlaying() || fromConfig < 60) fromConfig = Fallback;  // a Deadcraft cap left behind: don't keep it
-			Directory.CreateDirectory(Path.GetDirectoryName(StateFile)!);
-			File.WriteAllText(StateFile, fromConfig.ToString());
-			return fromConfig;
+			return ReadConfig();
 		}
 		catch (Exception e)
 		{
 			problem = e.Message;
-			return Fallback;
+			return null;
 		}
 	}
 

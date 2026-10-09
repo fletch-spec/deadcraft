@@ -68,18 +68,19 @@ public class DeadcraftPlugin : DeadworksPluginBase
 
 	public override void OnPrecacheResources() => Precache.AddResource(ColliderPool.Model);
 
-	// The void map has no baked light: turn on fullbright for each player's client as their hero spawns
-	// (a cheat convar; sv_cheats is on for this map).
-	public override void OnPawnHeroInitialized(CCitadelPlayerPawn pawn)
+	// Each time the hero comes alive on the void map (spawn and respawn; OnPawnHeroInitialized doesn't fire
+	// for a hero picked in hero select): fullbright, as the map has no baked light (a cheat convar;
+	// sv_cheats is on for this map), and Deadlock's frame cap for Deadcraft (DeadlockFrameCap).
+	private void SendClientSettings(CCitadelPlayerPawn pawn)
 	{
 		if (Server.MapName != VoidMap || pawn.IsBot || pawn.Controller == null) return;
 		Server.ExecuteCommand("sv_cheats 1");
 		Server.ClientCommand(pawn.Controller.Slot, "mat_fullbright 1");
 		int cap = DeadlockFrameCap.WhilePlaying();
-		int original = DeadlockFrameCap.Original(out string? problem);
+		int? original = DeadlockFrameCap.Original(out string? problem);
 		Server.ClientCommand(pawn.Controller.Slot, $"fps_max {cap}");
-		Log($"mat_fullbright 1 and fps_max {cap} sent to slot {pawn.Controller.Slot}; their own fps_max is {original}"
-			+ (problem == null ? "" : $" (couldn't read it: {problem})"));
+		Log($"mat_fullbright 1 and fps_max {cap} sent to slot {pawn.Controller.Slot}; their saved fps_max is "
+			+ (original?.ToString() ?? $"unknown ({problem ?? "no Deadlock settings found"})") + " (autoexec.cfg restores it at launch)");
 	}
 
 	public override void OnUnload()
@@ -105,7 +106,11 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		var hero = FindHero();
 		bool alive = hero != null && hero.IsAlive;
 		if (!alive) _aliveSince = -1f;
-		else if (_aliveSince < 0) _aliveSince = GlobalVars.CurTime;
+		else if (_aliveSince < 0)
+		{
+			_aliveSince = GlobalVars.CurTime;
+			SendClientSettings(hero!);
+		}
 		// Deadlock rejects the void map's spawn entities and spawns heroes at the world origin, the
 		// slab's corner, sometimes twice per spawn. Nothing else ever puts a hero there (home is over
 		// the slab's centre), so a hero near the origin has just spawned: move it to the centre.
