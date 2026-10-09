@@ -32,7 +32,7 @@ Play on a Minecraft Java server as a real Deadlock hero (first target: Celeste).
 | `fabric-client/` | Fabric client mod, Minecraft 26.3: follows the Deadlock hero, vanilla fallback. `gradlew runClient` | M3 |
 | `fabric-server/` | Fabric server mod, Minecraft 26.3 | M5 |
 | `docs/` | Feasibility, feel test, collider test | M0+ |
-| `tools/` | `get-deadworks.ps1` (pinned Deadworks), `run-server.ps1` (local server), `compile-map.ps1` (void map), `nbt-to-colliders.py` (structure → colliders) | M1 |
+| `tools/` | `get-deadworks.ps1` (pinned Deadworks), `run-server.ps1` (local server), `compile-map.ps1` (void map), `nbt-to-colliders.py` (structure → colliders), `make-shortcuts.ps1` (desktop shortcuts), `hero-export/` (a hero's model and animations from your own Deadlock install to a local .glb) | M1, M6 |
 | `maps/` | `deadcraft_void.vmap`, the empty host map | M1 |
 | `courses/` | Structure-block exports for the feel test | M1 |
 | `spikes/collider-test/` | Throwaway plugin: can spawned boxes block the hero? | M4 spike |
@@ -69,7 +69,11 @@ Filled in as each component lands.
    ```
    fabric-client\gradlew -p fabric-client runClient
    ```
-10. Tests: `dotnet test protocol/csharp/tests` and `protocol\java\gradlew -p protocol\java test`. After editing the protocol: `python protocol/generate.py`.
+10. Hero model, once per hero (Celeste is `unicorn`; writes `%LOCALAPPDATA%\Deadcraft\heroes\unicorn.glb`, never committed):
+   ```
+   dotnet run --project tools/hero-export unicorn
+   ```
+11. Tests: `dotnet test protocol/csharp/tests` and `protocol\java\gradlew -p protocol\java test`. After editing the protocol: `python protocol/generate.py`.
 
 ## License
 
