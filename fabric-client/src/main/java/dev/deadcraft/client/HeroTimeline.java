@@ -27,6 +27,7 @@ final class HeroTimeline {
 	record Pose(double x, double y, double z, float yaw, float pitch) {}
 
 	private final ArrayDeque<Sample> samples = new ArrayDeque<>();
+	private double delay = DELAY_S;
 	/** local clock - server clock, tracking the earliest arrivals (the least delayed ones). */
 	private double offset = Double.NaN;
 
@@ -59,6 +60,20 @@ final class HeroTimeline {
 		samples.addAll(moved);
 	}
 
+	/** Seconds behind the newest sample that frames are drawn (DELAY_S by default). */
+	void setDelay(double seconds) {
+		delay = seconds;
+	}
+
+	double delay() {
+		return delay;
+	}
+
+	/** When a sample stamped {@code serverTime} reached us, in local seconds. */
+	double localTime(double serverTime) {
+		return serverTime + offset;
+	}
+
 	boolean isEmpty() {
 		return samples.isEmpty();
 	}
@@ -66,7 +81,7 @@ final class HeroTimeline {
 	/** The pose to draw at local time {@code localNow} (seconds). */
 	Pose poseAt(double localNow) {
 		Sample newest = samples.peekLast();
-		double t = localNow - offset - DELAY_S;
+		double t = localNow - offset - delay;
 		if (t >= newest.serverTime()) {
 			double dt = Math.min(t - newest.serverTime(), MAX_EXTRAPOLATE_S);
 			return new Pose(newest.x() + newest.vx() * dt, newest.y() + newest.vy() * dt, newest.z() + newest.vz() * dt,

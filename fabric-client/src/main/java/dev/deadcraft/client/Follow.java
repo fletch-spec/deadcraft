@@ -48,6 +48,10 @@ public final class Follow {
 	private static final BlockExport export = new BlockExport();
 	private static final HeroTimeline timeline = new HeroTimeline();
 	private static final Overlay overlay = new Overlay();
+	private static final RawMouse rawMouse = new RawMouse();
+	private static final LookPredictor look = new LookPredictor(rawMouse);
+	private static boolean rawLook = true;
+	private static long lastLookTick = -1;
 	private static boolean savedBobView;
 	private static long lastGoodRead;
 
@@ -135,7 +139,13 @@ public final class Follow {
 		Vec3 v = Proto.toMinecraft(hero.velocity);
 		timeline.add(new HeroTimeline.Sample(hero.tick, hero.serverTime, heroBlocks.x(), heroBlocks.y(), heroBlocks.z(),
 			hero.cameraAngles.y(), hero.cameraAngles.x(), v.x(), v.y(), v.z()), localNow);
+		if (hero.tick != lastLookTick) {
+			lastLookTick = hero.tick;
+			look.addSample(timeline.localTime(hero.serverTime), hero.cameraAngles.y(), hero.cameraAngles.x());
+		}
 		HeroTimeline.Pose pose = timeline.poseAt(localNow);
+		// Raw-mouse look while Deadlock has the input; Deadlock's own (delayed) angles otherwise.
+		LookPredictor.Look predicted = rawLook && mc.gui.screen() == null ? look.predict(System.nanoTime()) : null;
 		double x = anchorX + (pose.x() - heroAnchor.x());
 		double y = anchorY + (pose.y() - heroAnchor.y());
 		double z = anchorZ + (pose.z() - heroAnchor.z());
@@ -155,8 +165,8 @@ public final class Follow {
 
 		if (mc.gui.screen() == null) {
 			// Source yaw 0 faces +x (Minecraft east, yaw -90) and turns toward +y (Minecraft north).
-			float yaw = -90f - pose.yaw();
-			float pitch = pose.pitch();
+			float yaw = -90f - (predicted != null ? predicted.yaw() : pose.yaw());
+			float pitch = predicted != null ? predicted.pitch() : pose.pitch();
 			player.setYRot(yaw);
 			player.setXRot(pitch);
 			player.yRotO = yaw;
@@ -188,10 +198,10 @@ public final class Follow {
 		lastFrame = now;
 		if (statsSince == 0) statsSince = now;
 		if (now - statsSince < 10 || frames == 0) return;
-		LOG.info("Deadcraft: frames {} avg {} ms ({} fps) worst {} ms; block export worst {} ms; limit {} vsync {}",
+		LOG.info("Deadcraft: frames {} avg {} ms ({} fps) worst {} ms; block export worst {} ms; limit {} vsync {}; {}; raw mouse reports {}",
 			frames, String.format("%.2f", frameSum / frames * 1000), String.format("%.0f", frames / frameSum),
 			String.format("%.1f", frameMax * 1000), String.format("%.1f", exportMax * 1000),
-			mc.options.framerateLimit().get(), mc.options.enableVsync().get());
+			mc.options.framerateLimit().get(), mc.options.enableVsync().get(), look.describe(), rawMouse.reports());
 		statsSince = now;
 		frameMax = frameSum = exportMax = 0;
 		frames = 0;
@@ -273,12 +283,16 @@ public final class Follow {
 			LOG.info("Deadcraft: monitor {} Hz, frame limit {}, vsync {}", monitor == null ? "?" : monitor.currentMode().getRefreshRate(),
 				mc.options.framerateLimit().get(), mc.options.enableVsync().get());
 			DeadlockCamera.onLink(mc, true);
+			look.clear();
+			lastLookTick = -1;
+			if (rawLook) rawMouse.start();
 			lastProblem = "";
 			status(mc, "Deadcraft: following the Deadlock hero");
 		} else {
 			mc.options.pauseOnLostFocus = savedPauseOnLostFocus;
 			mc.options.bobView().set(savedBobView);
 			DeadlockCamera.onLink(mc, false);
+			rawMouse.stop();
 			status(mc, "Deadcraft: unlinked, vanilla movement" + (lastProblem.isEmpty() ? "" : " (" + lastProblem + ")"));
 		}
 		LOG.info("Deadcraft: {}", link ? "linked" : "unlinked " + lastProblem);
@@ -306,6 +320,28 @@ public final class Follow {
 
 	static String camera(Boolean on) {
 		return on == null ? DeadlockCamera.describe() : DeadlockCamera.setEnabled(Minecraft.getInstance(), on, linked);
+	}
+
+	static String look(Boolean raw) {
+		if (raw != null) {
+			rawLook = raw;
+			if (raw && linked) rawMouse.start();
+			if (!raw) rawMouse.stop();
+		}
+		if (!rawLook) return "look: Deadlock's angles (smoothed, delayed). /deadcraft look raw to turn with the mouse.";
+		String problem = rawMouse.problem();
+		return look.describe() + (problem.isEmpty() ? "" : " [" + problem + "]");
+	}
+
+	static String lookRecalibrate() {
+		look.reset();
+		return "look: calibration cleared; move the mouse around in Deadlock for a few seconds.";
+	}
+
+	static String delay(Float ms) {
+		if (ms != null) timeline.setDelay(ms / 1000.0);
+		return String.format("position delay %.0f ms behind Deadlock's newest sample (default %.0f).", timeline.delay() * 1000,
+			HeroTimeline.DELAY_S * 1000);
 	}
 
 	static String setOverlay(boolean on) {
