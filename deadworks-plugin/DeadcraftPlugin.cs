@@ -35,6 +35,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private float _aliveSince = -1f;
 	private CCitadelPlayerPawn? _hero;
 	private bool _warnedSeveralHumans;
+	private bool _clientLinked;
 
 	public override void OnLoad(bool isReload)
 	{
@@ -124,7 +125,11 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	{
 		if (!_mapping!.TryReadMcState(_cubeGeneration, out var mc, _cubes) || mc.Generation == _cubeGeneration) return;
 		_cubeGeneration = mc.Generation;
-		if ((mc.Flags & (uint)McFlags.Linked) == 0) return;
+		bool linked = (mc.Flags & (uint)McFlags.Linked) != 0;
+		if (linked != _clientLinked) Log(linked ? "Minecraft client linked" : "Minecraft client unlinked");
+		if (linked && !_clientLinked) _colliders.ClientRelinked();
+		_clientLinked = linked;
+		if (!linked) return;
 		Log(_colliders.Apply(mc, _cubes));
 	}
 
@@ -134,7 +139,9 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	{
 		// Not before home is known, and not until the hero has been alive a moment: during hero
 		// select and spawning the pawn sits at the origin and must not be moved.
-		if (_colliders.Active == 0 || Server.MapName != VoidMap || _aliveSince < 0 || GlobalVars.CurTime - _aliveSince < 1f) return;
+		// Never while the client is unlinked: the stale colliders don't follow the hero, so a hero that
+		// wandered off them would be lifted into empty air, fall and be lifted again, forever.
+		if (!_clientLinked || _colliders.Active == 0 || Server.MapName != VoidMap || _aliveSince < 0 || GlobalVars.CurTime - _aliveSince < 1f) return;
 		var p = hero.Position;
 		if (Math.Abs(p.X - Home.X) < MaxHorizontal && Math.Abs(p.Y - Home.Y) < MaxHorizontal
 			&& Math.Abs(p.Z - Home.Z) < MaxVertical) return;

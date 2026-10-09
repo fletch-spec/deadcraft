@@ -104,6 +104,12 @@ internal sealed class ColliderPool
 		_awaitingClientOffset = true;
 	}
 
+	/// <summary>
+	/// The client linked afresh and anchored anew: its next offset is the truth, whatever recentres
+	/// happened while it was away.
+	/// </summary>
+	public void ClientRelinked() => _awaitingClientOffset = false;
+
 	private static bool Close(Double3 a, Double3 b) =>
 		Math.Abs(a.X - b.X) < 1e-3 && Math.Abs(a.Y - b.Y) < 1e-3 && Math.Abs(a.Z - b.Z) < 1e-3;
 
