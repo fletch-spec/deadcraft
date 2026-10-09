@@ -40,8 +40,10 @@ internal static class DeadlockFrameCap
 	// Steam\userdata\<account>\1422450\local\cfg\machine_convars.vcfg: "fps_max"  "400"
 	private static int? ReadConfig()
 	{
-		// The plugin runs from Steam\steamapps\common\Deadlock\game\bin\win64\managed\plugins.
-		var dir = new DirectoryInfo(AppContext.BaseDirectory);
+		// From the server, SteamsteamappsmmonDeadlockgamebinwin64deadworks.exe (AppContext.BaseDirectory is empty here).
+		var exe = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+		if (exe == null) return null;
+		var dir = new DirectoryInfo(Path.GetDirectoryName(exe)!);
 		while (dir != null && !string.Equals(dir.Name, "steamapps", StringComparison.OrdinalIgnoreCase)) dir = dir.Parent;
 		var userdata = dir?.Parent is { } steam ? Path.Combine(steam.FullName, "userdata") : null;
 		if (userdata == null || !Directory.Exists(userdata)) return null;
