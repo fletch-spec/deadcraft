@@ -150,24 +150,46 @@ class HeroRealPackTest {
 		assertTrue(worst < SKIRT_REACH, "skirt " + worst + " m from the hips during the landing; see build/skirt-landing.txt");
 	}
 
-	/** In every clip (layered ones too) and with the upper body turned, the wand keeps its grip in the right hand. */
+	/** In every clip (layered ones too) and with the upper body turned, the hand holds the wand at its grip. */
 	@Test
 	void wandStaysInTheHand() throws Exception {
 		HeroModel m = celeste();
-		int weapon = m.node("weaponPivot"), hand = m.node("hand_R");
-		int[] look = {m.node("spine_1"), m.node("spine_2"), m.node("spine_3"), m.node("neck_0"), m.node("head")};
-		float[] shares = {0.15f, 0.2f, 0.2f, 0.2f, 0.25f};
+		HeroModel.Rig rig = new HeroModel.Rig();
+		rig.twistNodes = new int[] {m.node("spine_1"), m.node("spine_2"), m.node("spine_3"), m.node("neck_0"), m.node("head")};
+		rig.twistShares = new float[] {0.15f, 0.2f, 0.2f, 0.2f, 0.25f};
+		rig.follower = m.node("weaponPivot");
+		rig.grip = m.node("weaponHand_R");
+		rig.leader = m.node("hand_R");
+		rig.twist = (float) Math.toRadians(35);
+		rig.followerTwist = rig.twist * 0.55f;
 		float[] world = new float[m.nodeCount() * 12], skin = new float[m.skinnedJointCount() * 12];
-		m.skin(sample(m, m.clips.get("out_of_combat_stand_idle"), 0), world, 0, look, shares, skin);
-		float[] grip = new float[12], held = new float[12];
-		HeroModel.relative(world, weapon, hand, grip);
 		for (HeroModel.Clip c : m.clips.values()) {
 			for (int f = 0; f < c.frames(); f += 3) {
-				m.skin(sample(m, c, f / c.fps()), world, (float) Math.toRadians(35), look, shares, weapon, hand, grip, skin);
-				HeroModel.relative(world, weapon, hand, held);
-				for (int k = 0; k < 12; k++) assertTrue(Math.abs(held[k] - grip[k]) < 1e-3, c.name() + " frame " + f + ": wand off its grip");
+				m.skin(sample(m, c, f / c.fps()), world, rig, skin);
+				double d = Math.sqrt(sq(world[rig.grip * 12 + 3] - world[rig.leader * 12 + 3]) + sq(world[rig.grip * 12 + 7] - world[rig.leader * 12 + 7])
+					+ sq(world[rig.grip * 12 + 11] - world[rig.leader * 12 + 11]));
+				assertTrue(d < 1e-3, c.name() + " frame " + f + ": hand " + d + " m from the wand's grip");
 			}
 		}
+	}
+
+	/** Running, the swung ponytail ends up behind the back instead of hanging into it. */
+	@Test
+	void hairSwingsBehindWhenRunning() throws Exception {
+		HeroModel m = celeste();
+		HeroModel.Rig rig = new HeroModel.Rig();
+		rig.swingNodes = new int[] {m.node("ponytail_0"), m.node("ponytail_5"), m.node("ponytail_10")};
+		rig.swingShares = new float[] {0.45f, 0.3f, 0.25f};
+		rig.swing = (float) Math.toRadians(40);
+		float[] world = new float[m.nodeCount() * 12], skin = new float[m.skinnedJointCount() * 12];
+		m.skin(sample(m, m.clips.get("out_of_combat_run_n"), 0.2f), world, rig, skin);
+		int end = m.node("ponytail_20"), pelvis = m.node("pelvis");  // the last joint in the pack (end joints move no vertex)
+		// The model faces +Z: behind the back is smaller z.
+		assertTrue(world[end * 12 + 11] < world[pelvis * 12 + 11] - 0.15, "ponytail end z " + world[end * 12 + 11] + ", pelvis z " + world[pelvis * 12 + 11]);
+	}
+
+	private static double sq(double v) {
+		return v * v;
 	}
 
 	/** The skirt (vertices hanging mainly from cloth bones) stays near the hips in every clip and frame. */

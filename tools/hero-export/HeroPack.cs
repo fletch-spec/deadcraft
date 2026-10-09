@@ -157,6 +157,12 @@ internal static class HeroPack
 		{
 			for (var n = skinOf[d].GetJoint(j).Joint; n != null; n = n.VisualParent) wanted.Add(n.LogicalIndex);
 		}
+		// Joints that move no vertex but the client needs: the weapon's hand targets (Deadlock pulls the
+		// hands onto them at runtime).
+		foreach (var extra in new[] { "weaponHand_R", "weaponHand_L" })
+		{
+			for (var n = model.LogicalNodes.FirstOrDefault(x => x.Name == extra); n != null; n = n.VisualParent) wanted.Add(n.LogicalIndex);
+		}
 		int Depth(int logical)
 		{
 			int k = 0;

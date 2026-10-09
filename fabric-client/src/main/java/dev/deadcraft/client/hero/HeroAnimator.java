@@ -66,12 +66,19 @@ public final class HeroAnimator {
 	private final float[] world, skin;
 	private final int[] lookNodes;
 	private final float[] lookShares;
+	/** The twist, the hair swing and the weapon in the hand, applied when building the skeleton. */
+	private final HeroModel.Rig rig = new HeroModel.Rig();
+	/** The arm's share of the upper-body twist (the shares of the twisted joints above the hand). */
+	private float armShare;
 	/**
-	 * The weapon hangs off the skeleton's root (Deadlock pins it to the hand): it is held in the right
-	 * hand at the grip it has in the standing idle, in every clip.
+	 * Hair the clips leave hanging (Deadlock moves it with physics at runtime): chain roots and their
+	 * share of the swing. The ponytail bends along its length.
 	 */
-	private final int weapon, hand;
-	private final float[] grip;
+	private static final String[] HAIR_NODES = {"ponytail_0", "ponytail_5", "ponytail_10", "hair_ribbon_0_L", "hair_ribbon_0_R", "hair_tress_0_R"};
+	private static final float[] HAIR_SHARES = {0.45f, 0.3f, 0.25f, 0.7f, 0.7f, 0.5f};
+	/** Hair swing at run speed, most it swings back, most forward, and how fast it follows, degrees and seconds. */
+	static final float HAIR_AT_RUN = 40f, HAIR_MAX = 60f, HAIR_MIN = -10f, HAIR_EASE_S = 0.18f;
+	private float hairSwing;
 	private State state = State.IDLE;
 	/** A move started by an ability event or the motion, held until it ends. */
 	private State move;
@@ -105,21 +112,27 @@ public final class HeroAnimator {
 			nodes[found] = n;
 			shares[found++] = LOOK_SHARES[i];
 		}
-		weapon = model.node("weaponPivot");
-		hand = model.node("hand_R");
-		HeroModel.Clip idle = model.clips.get("out_of_combat_stand_idle");
-		if (weapon >= 0 && hand >= 0 && idle != null) {
-			HeroModel.Pose p = model.newPose();
-			p.add(idle, 0, 1);
-			p.finish();
-			model.skin(p, world, 0, new int[0], new float[0], skin);
-			grip = new float[12];
-			HeroModel.relative(world, weapon, hand, grip);
-		} else {
-			grip = null;
-		}
 		lookNodes = java.util.Arrays.copyOf(nodes, found);
 		lookShares = java.util.Arrays.copyOf(shares, found);
+		rig.twistNodes = lookNodes;
+		rig.twistShares = lookShares;
+		rig.follower = model.node("weaponPivot");
+		rig.grip = model.node("weaponHand_R");
+		rig.leader = model.node("hand_R");
+		if (rig.leader >= 0) {
+			for (int i = 0; i < lookNodes.length; i++) if (model.isAncestor(lookNodes[i], rig.leader)) armShare += lookShares[i];
+		}
+		int hairFound = 0;
+		int[] hair = new int[HAIR_NODES.length];
+		float[] hairShares = new float[HAIR_NODES.length];
+		for (int i = 0; i < HAIR_NODES.length; i++) {
+			int n = model.node(HAIR_NODES[i]);
+			if (n < 0) continue;
+			hair[hairFound] = n;
+			hairShares[hairFound++] = HAIR_SHARES[i];
+		}
+		rig.swingNodes = java.util.Arrays.copyOf(hair, hairFound);
+		rig.swingShares = java.util.Arrays.copyOf(hairShares, hairFound);
 	}
 
 	/** The node world matrices of the last {@link #update} (for tests). */
@@ -228,7 +241,14 @@ public final class HeroAnimator {
 		shown.copyFrom(previous);
 		shown.blendTowards(pose, fade < 1 ? smooth(fade) : 1);
 		// Model space turns the other way round from Minecraft's yaw (the renderer turns by -yaw).
-		model.skin(shown, world, (float) -Math.toRadians(look), lookNodes, lookShares, weapon, hand, grip, skin);
+		rig.twist = (float) -Math.toRadians(look);
+		rig.followerTwist = rig.twist * armShare;
+		// Hair streams back with forward speed and lifts in a fall.
+		float hairTarget = (float) Math.max(HAIR_MIN, Math.min(HAIR_MAX, in.forward() / runSpeed * HAIR_AT_RUN
+			+ (in.grounded() ? 0 : Math.max(0, Math.min(25, -in.up() * 4)))));
+		hairSwing += (hairTarget - hairSwing) * (1 - (float) Math.exp(-dt / HAIR_EASE_S));
+		rig.swing = (float) Math.toRadians(hairSwing);
+		model.skin(shown, world, rig, skin);
 		return skin;
 	}
 

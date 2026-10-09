@@ -327,6 +327,25 @@ public final class HeroModel {
 		for (int k = 0; k < 4; k++) q[at + k] /= len;
 	}
 
+	/** Adjustments on top of the blended pose, applied by {@link #skin(Pose, float[], Rig, float[])}. */
+	public static final class Rig {
+		/** Upper-body turn about the model's up axis (+Y), radians, spread over twistNodes by twistShares. */
+		public float twist;
+		public int[] twistNodes = {};
+		public float[] twistShares = {};
+		/** Hair swing about the model's side axis (+X), radians, positive backwards, spread over swingNodes. */
+		public float swing;
+		public int[] swingNodes = {};
+		public float[] swingShares = {};
+		/**
+		 * The weapon: {@code follower} and everything below it is moved so that {@code grip} (a node below
+		 * it) lands on {@code leader} (the hand), after turning about the grip by {@code followerTwist}
+		 * radians (the arm's share of the upper-body turn). -1 for none.
+		 */
+		public int follower = -1, grip = -1, leader = -1;
+		public float followerTwist;
+	}
+
 	/**
 	 * Builds the skeleton from {@code pose} and writes each skinned joint's 3x4 matrix into
 	 * {@code out}. {@code twist} adds a turn about the model's up axis (glTF +Y), in radians, to the
@@ -334,29 +353,52 @@ public final class HeroModel {
 	 * position: children inherit it, so the shares add up along a chain such as spine to head.
 	 */
 	public void skin(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares, float[] out) {
-		skin(pose, world, twist, twistNodes, twistShares, -1, -1, null, out);
+		Rig rig = new Rig();
+		rig.twist = twist;
+		rig.twistNodes = twistNodes;
+		rig.twistShares = twistShares;
+		skin(pose, world, rig, out);
 	}
 
 	/**
-	 * As above, and {@code follower} (with everything below it) is held at {@code grip} (a 3x4 placement
-	 * relative to {@code leader}, see {@link #relative}): Celeste's weapon hangs off the skeleton's root,
-	 * not her hand (Deadlock pins it there at runtime), so on its own it drifts from the hand in some
-	 * clips, in layered clips and under the upper-body twist.
+	 * Builds the skeleton from {@code pose} with {@code rig}'s adjustments and writes each skinned
+	 * joint's 3x4 matrix into {@code out}. Turns are about each listed node's own position, and children
+	 * inherit them, so shares add up along a chain (spine to head, the ponytail). The weapon then goes to
+	 * the hand: Celeste's weapon hangs off the skeleton's root and Deadlock pulls her hand onto it at
+	 * runtime; in every clip her hand sits exactly on the weapon's grip, but blends, layers and the twist
+	 * move the two apart, so the weapon keeps its animated turn and is placed in the hand.
 	 */
-	public void skin(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares, int follower, int leader, float[] grip,
-		float[] out) {
-		build(pose, world, twist, twistNodes, twistShares);
-		if (follower >= 0 && leader >= 0 && grip != null) {
-			int fo = follower * 12;
-			mul(world, leader * 12, grip[0], grip[1], grip[2], grip[3], grip[4], grip[5], grip[6], grip[7], grip[8], grip[9], grip[10],
-				grip[11], world, fo);
-			// Everything below the follower again, from its new place (parents come first).
+	public void skin(Pose pose, float[] world, Rig rig, float[] out) {
+		for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
+			int o = n * 12;
+			local(pose.trs, n, world, o, parents[n] < 0 ? null : world, parents[n] * 12);
+			if (rig.twist != 0) {
+				for (int k = 0; k < rig.twistNodes.length; k++) {
+					if (rig.twistNodes[k] == n) turnAboutUp(world, o, rig.twist * rig.twistShares[k], world[o + 3], world[o + 11]);
+				}
+			}
+			if (rig.swing != 0) {
+				for (int k = 0; k < rig.swingNodes.length; k++) {
+					if (rig.swingNodes[k] == n) turnAboutSide(world, o, rig.swing * rig.swingShares[k]);
+				}
+			}
+		}
+		if (rig.follower >= 0 && rig.grip >= 0 && rig.leader >= 0) {
 			boolean[] below = new boolean[nodeCount()];
-			below[follower] = true;
-			for (int n = follower + 1; n < below.length; n++) {
-				if (parents[n] < 0 || !below[parents[n]]) continue;
-				below[n] = true;
-				local(pose.trs, n, world, n * 12, world, parents[n] * 12);
+			below[rig.follower] = true;
+			for (int n = rig.follower + 1; n < below.length; n++) below[n] = parents[n] >= 0 && below[parents[n]];
+			float gx = world[rig.grip * 12 + 3], gz = world[rig.grip * 12 + 11];
+			if (rig.followerTwist != 0) {
+				for (int n = 0; n < below.length; n++) if (below[n]) turnAboutUp(world, n * 12, rig.followerTwist, gx, gz);
+			}
+			float dx = world[rig.leader * 12 + 3] - world[rig.grip * 12 + 3];
+			float dy = world[rig.leader * 12 + 7] - world[rig.grip * 12 + 7];
+			float dz = world[rig.leader * 12 + 11] - world[rig.grip * 12 + 11];
+			for (int n = 0; n < below.length; n++) {
+				if (!below[n]) continue;
+				world[n * 12 + 3] += dx;
+				world[n * 12 + 7] += dy;
+				world[n * 12 + 11] += dz;
 			}
 		}
 		for (int s = 0, joints = skinnedJointCount(); s < joints; s++) {
@@ -367,6 +409,12 @@ public final class HeroModel {
 		}
 	}
 
+	/** Whether {@code ancestor} is {@code node} or above it. */
+	public boolean isAncestor(int ancestor, int node) {
+		for (int n = node; n >= 0; n = parents[n]) if (n == ancestor) return true;
+		return false;
+	}
+
 	/** Node {@code node}'s placement relative to node {@code to}, from built world matrices, into out[0..12]. */
 	public static void relative(float[] world, int node, int to, float[] out) {
 		float[] inv = new float[12];
@@ -374,19 +422,6 @@ public final class HeroModel {
 		int o = node * 12;
 		mul(inv, 0, world[o], world[o + 1], world[o + 2], world[o + 3], world[o + 4], world[o + 5], world[o + 6], world[o + 7], world[o + 8],
 			world[o + 9], world[o + 10], world[o + 11], out, 0);
-	}
-
-	/** World matrices of every node from {@code pose}, with the upper-body twist. */
-	private void build(Pose pose, float[] world, float twist, int[] twistNodes, float[] twistShares) {
-		for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
-			int o = n * 12;
-			local(pose.trs, n, world, o, parents[n] < 0 ? null : world, parents[n] * 12);
-			if (twist != 0) {
-				for (int k = 0; k < twistNodes.length; k++) {
-					if (twistNodes[k] == n) turnAboutUp(world, o, twist * twistShares[k]);
-				}
-			}
-		}
 	}
 
 	/** out[o..] = parent[po..] * node n's local transform (the local alone when parent is null). */
@@ -447,17 +482,26 @@ public final class HeroModel {
 		out[o + 11] = a20 * b03 + a21 * b13 + a22 * b23 + a23;
 	}
 
-	/** Pre-multiplies the 3x4 at o by a turn of {@code angle} about +Y through its own origin. */
-	private static void turnAboutUp(float[] m, int o, float angle) {
+	/** Pre-multiplies the 3x4 at o by a turn of {@code angle} about +Y through the point (px, *, pz). */
+	private static void turnAboutUp(float[] m, int o, float angle, float px, float pz) {
 		float c = (float) Math.cos(angle), s = (float) Math.sin(angle);
-		float px = m[o + 3], pz = m[o + 11];
 		for (int col = 0; col < 3; col++) {
 			float x = m[o + col], z = m[o + 8 + col];
 			m[o + col] = c * x + s * z;
 			m[o + 8 + col] = -s * x + c * z;
 		}
-		// The origin stays put: the rotation is about it.
-		m[o + 3] = px;
-		m[o + 11] = pz;
+		float x = m[o + 3] - px, z = m[o + 11] - pz;
+		m[o + 3] = px + c * x + s * z;
+		m[o + 11] = pz - s * x + c * z;
+	}
+
+	/** Pre-multiplies the 3x4 at o by a turn of {@code angle} about +X through its own origin (+ swings -Y towards -Z). */
+	private static void turnAboutSide(float[] m, int o, float angle) {
+		float c = (float) Math.cos(angle), s = (float) Math.sin(angle);
+		for (int col = 0; col < 3; col++) {
+			float y = m[o + 4 + col], z = m[o + 8 + col];
+			m[o + 4 + col] = c * y - s * z;
+			m[o + 8 + col] = s * y + c * z;
+		}
 	}
 }
