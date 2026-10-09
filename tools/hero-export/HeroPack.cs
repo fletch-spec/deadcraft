@@ -49,6 +49,30 @@ internal static class HeroPack
 		("run_to_stop_stand", false),
 		("mantle_32", false), ("mantle_64", false), ("mantle_96", false), ("mantle_128", false),
 		("wall_attach_forward", false), ("wall_attach_left", false), ("wall_attach_right", false),
+		// Combat: weapon stance, aiming (additive: up, centre and down, blended by camera pitch), shooting,
+		// reloading, melee.
+		("weapon_crouch_idle", true),
+		("weapon_run_n", true), ("weapon_run_ne", true), ("weapon_run_e", true), ("weapon_run_se", true),
+		("weapon_run_s", true), ("weapon_run_sw", true), ("weapon_run_w", true), ("weapon_run_nw", true),
+		("weapon_crouch_run_n", true), ("weapon_crouch_run_ne", true), ("weapon_crouch_run_e", true), ("weapon_crouch_run_se", true),
+		("weapon_crouch_run_s", true), ("weapon_crouch_run_sw", true), ("weapon_crouch_run_w", true), ("weapon_crouch_run_nw", true),
+		("aim_out_of_combat_idle", true), ("aim_out_of_combat_idle_up", true), ("aim_out_of_combat_idle_down", true),
+		("aim_weapon_idle", true), ("aim_weapon_idle_up", true), ("aim_weapon_idle_down", true),
+		("aim_weapon_run", true), ("aim_weapon_run_up", true), ("aim_weapon_run_down", true),
+		("aim_weapon_crouch", true), ("aim_weapon_crouch_up", true), ("aim_weapon_crouch_down", true),
+		("aim_weapon_slide", true), ("aim_weapon_slide_up", true), ("aim_weapon_slide_down", true),
+		("shoot_idle_start", false), ("shoot_idle_loop", true), ("shoot_crouch_start", false), ("shoot_crouch_loop", true),
+		("reload_idle", false), ("reload_run", false), ("reload_crouch_idle", false), ("reload_in_air_quick", false), ("reload_slide_quick", false),
+		("melee_quick_1", false), ("melee_quick_2", false), ("melee_quick_in_air_1", false), ("melee_quick_in_air_2", false),
+		("melee_start", false), ("melee_hit", false), ("melee_in_air_start", false), ("melee_in_air_hit", false),
+		("flinch_back", false), ("flinch_left", false), ("flinch_right", false),
+		("parry", false), ("parry_inair", false),
+		// Celeste's abilities (other heroes' clips are named after theirs; missing clips are skipped).
+		("ability_radiant_daggers_stand_idle", true), ("ability_unicorn_dazzlingorb_start", false), ("ability_unicorn_dazzlingorb_loop", true),
+		("ability_unicorn_dazzlingorb_end", false), ("ability_unicorn_dazzlingorb_inair_end", false), ("ability_unicorn_dazzlingorb_reload_start", false),
+		("aim_dazzling_orb", true), ("aim_dazzling_orb_up", true), ("aim_dazzling_orb_down", true),
+		("ability_luminous_flux_running", true), ("ability_unicorn_prismaticguard", false), ("ability_unicorn_radiant_blast", false),
+		("cast_start", false), ("cast_loop", true), ("cast_end", false), ("throw", false),
 	];
 
 	public static void Write(string glbPath, string outPath, int targetTriangles)

@@ -16,6 +16,7 @@ public sealed unsafe class Mapping : IDisposable
 	private readonly MemoryMappedViewAccessor _view;
 	private readonly byte* _base;
 	private uint _abilitySerial;
+	private uint _shotSerial;
 
 	private Mapping(MemoryMappedFile file)
 	{
@@ -70,7 +71,7 @@ public sealed unsafe class Mapping : IDisposable
 	}
 
 	/// <summary>Publishes hero state under the seqlock. <see cref="HeroState.Seq"/> and
-	/// <see cref="HeroState.AbilityEventSerial"/> are filled in here.</summary>
+	/// <see cref="HeroState.AbilityEventSerial"/> and <see cref="HeroState.ShotSerial"/> are filled in here.</summary>
 	public void WriteHeroState(HeroState state)
 	{
 		ref uint seq = ref *(uint*)(_base + HeroState.Offset + HeroState.SeqAt);
@@ -78,6 +79,7 @@ public sealed unsafe class Mapping : IDisposable
 		Volatile.Write(ref seq, start);
 		state.Seq = start;
 		state.AbilityEventSerial = _abilitySerial;
+		state.ShotSerial = _shotSerial;
 		state.Write(Region(HeroState.Offset, HeroState.Size));
 		Volatile.Write(ref seq, start + 1);       // even: stable
 	}
@@ -125,6 +127,34 @@ public sealed unsafe class Mapping : IDisposable
 		Region(at, AbilityEvent.Size).CopyTo(copy);
 		Interlocked.MemoryBarrier();
 		return Volatile.Read(ref entrySerial) == serial ? AbilityEvent.Read(copy) : null;
+	}
+
+	/// <summary>Appends a shot to the ring (visible to readers with the next <see cref="WriteHeroState"/>).
+	/// Fills in its serial.</summary>
+	public void AppendShot(Shot shot)
+	{
+		uint serial = ++_shotSerial;
+		int at = Proto.ShotsOffset + (int)((serial - 1) % Proto.ShotsCapacity) * Shot.Size;
+		ref uint entrySerial = ref *(uint*)(_base + at + Shot.SerialAt);
+		Volatile.Write(ref entrySerial, 0u);
+		shot.Serial = 0;
+		shot.Write(Region(at, Shot.Size));
+		Volatile.Write(ref entrySerial, serial);
+	}
+
+	/// <summary>Reads the shot with this serial, or null if it was overwritten or not written yet.</summary>
+	public Shot? TryReadShot(uint serial)
+	{
+		int at = Proto.ShotsOffset + (int)((serial - 1) % Proto.ShotsCapacity) * Shot.Size;
+		ref uint entrySerial = ref *(uint*)(_base + at + Shot.SerialAt);
+		if (Volatile.Read(ref entrySerial) != serial) return null;
+		Span<byte> copy = stackalloc byte[Shot.Size];
+		Region(at, Shot.Size).CopyTo(copy);
+		Interlocked.MemoryBarrier();
+		if (Volatile.Read(ref entrySerial) != serial) return null;
+		var shot = Shot.Read(copy);
+		shot.Serial = serial;
+		return shot;
 	}
 
 	/// <summary>Publishes the Minecraft side's state and cube set under the McState seqlock

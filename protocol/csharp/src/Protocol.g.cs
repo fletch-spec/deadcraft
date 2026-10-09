@@ -10,13 +10,16 @@ namespace Deadcraft.Protocol;
 public static partial class Proto
 {
 	public const uint Magic = 0x54464344;
-	public const uint Version = 4;
+	public const uint Version = 5;
 	public const string MappingName = @"Local\Deadcraft";
 	public const int MappingSize = 262144;
 	public const float UnitsPerBlock = 64.0f;
 
 	public const int AbilityEventsOffset = 0x200;
 	public const int AbilityEventsCapacity = 32;
+
+	public const int ShotsOffset = 0xA00;
+	public const int ShotsCapacity = 32;
 
 	public const int CubesOffset = 0x1040;
 	public const int CubesCapacity = 16384;
@@ -53,6 +56,7 @@ public enum HeroFlags : uint
 	Present = 1u << 0,
 	Alive = 1u << 1,
 	OnGround = 1u << 2,
+	Channeling = 1u << 3,
 }
 
 [Flags]
@@ -65,6 +69,12 @@ public enum McFlags : uint
 public enum AbilityEventKind : uint
 {
 	Used = 1,
+}
+
+public enum ShotKind : uint
+{
+	Fired = 1,
+	Impact = 2,
 }
 
 /// <summary>Identifies the mapping and shows which sides are alive.</summary>
@@ -123,7 +133,7 @@ public struct Header
 public struct HeroState
 {
 	public const int Offset = 0x100;
-	public const int Size = 0x80;
+	public const int Size = 0x100;
 	public const int SeqAt = 0x0;
 	public const int FlagsAt = 0x4;
 	public const int TickAt = 0x8;
@@ -142,6 +152,8 @@ public struct HeroState
 	public const int RecenterDeltaAt = 0x60;
 	public const int HullHeightAt = 0x6C;
 	public const int EntityFlagsAt = 0x70;
+	public const int ButtonsAt = 0x78;
+	public const int ShotSerialAt = 0x80;
 
 	public uint Seq;
 	public uint Flags; // HeroFlags
@@ -161,6 +173,8 @@ public struct HeroState
 	public Vector3 RecenterDelta; // Source units the hero and every collider moved in the latest recentre
 	public float HullHeight; // collision box height, Source units (shrinks when crouching or sliding)
 	public uint EntityFlags; // the engine's entity flag bits (on ground, ducking, ...)
+	public ulong Buttons; // buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)
+	public uint ShotSerial; // serial of the newest Shot
 
 	public HeroState() { }
 
@@ -185,6 +199,8 @@ public struct HeroState
 		RecenterDelta = new Vector3(Proto.ReadSingle(s, RecenterDeltaAt), Proto.ReadSingle(s, RecenterDeltaAt + 4), Proto.ReadSingle(s, RecenterDeltaAt + 8)),
 		HullHeight = Proto.ReadSingle(s, HullHeightAt),
 		EntityFlags = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(EntityFlagsAt)),
+		Buttons = BinaryPrimitives.ReadUInt64LittleEndian(s.Slice(ButtonsAt)),
+		ShotSerial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(ShotSerialAt)),
 	};
 
 	/// <summary>Encode into a span that starts at this struct.</summary>
@@ -208,6 +224,8 @@ public struct HeroState
 		Proto.WriteSingle(s, RecenterDeltaAt, RecenterDelta.X); Proto.WriteSingle(s, RecenterDeltaAt + 4, RecenterDelta.Y); Proto.WriteSingle(s, RecenterDeltaAt + 8, RecenterDelta.Z);
 		Proto.WriteSingle(s, HullHeightAt, HullHeight);
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(EntityFlagsAt), EntityFlags);
+		BinaryPrimitives.WriteUInt64LittleEndian(s.Slice(ButtonsAt), Buttons);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(ShotSerialAt), ShotSerial);
 	}
 }
 
@@ -243,6 +261,49 @@ public struct AbilityEvent
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(KindAt), Kind);
 		BinaryPrimitives.WriteUInt64LittleEndian(s.Slice(TickAt), Tick);
 		Proto.WriteUtf8(s.Slice(AbilityNameAt, 48), AbilityName);
+	}
+}
+
+/// <summary>One bullet fired (origin and aim) or one impact (where it hit, and the surface normal).</summary>
+public struct Shot
+{
+	public const int Size = 0x30;
+	public const int SerialAt = 0x0;
+	public const int KindAt = 0x4;
+	public const int TickAt = 0x8;
+	public const int OriginAt = 0x10;
+	public const int DirectionAt = 0x1C;
+	public const int DamageAt = 0x28;
+
+	public uint Serial;
+	public uint Kind; // ShotKind
+	public ulong Tick;
+	public Vector3 Origin; // fired: muzzle; impact: hit point (Source units)
+	public Vector3 Direction; // fired: pitch, yaw, roll in degrees; impact: surface normal
+	public uint Damage; // impact: damage dealt (0 on world geometry)
+
+	public Shot() { }
+
+	/// <summary>Decode from a span that starts at this struct.</summary>
+	public static Shot Read(ReadOnlySpan<byte> s) => new()
+	{
+		Serial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(SerialAt)),
+		Kind = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(KindAt)),
+		Tick = BinaryPrimitives.ReadUInt64LittleEndian(s.Slice(TickAt)),
+		Origin = new Vector3(Proto.ReadSingle(s, OriginAt), Proto.ReadSingle(s, OriginAt + 4), Proto.ReadSingle(s, OriginAt + 8)),
+		Direction = new Vector3(Proto.ReadSingle(s, DirectionAt), Proto.ReadSingle(s, DirectionAt + 4), Proto.ReadSingle(s, DirectionAt + 8)),
+		Damage = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(DamageAt)),
+	};
+
+	/// <summary>Encode into a span that starts at this struct.</summary>
+	public readonly void Write(Span<byte> s)
+	{
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(SerialAt), Serial);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(KindAt), Kind);
+		BinaryPrimitives.WriteUInt64LittleEndian(s.Slice(TickAt), Tick);
+		Proto.WriteSingle(s, OriginAt, Origin.X); Proto.WriteSingle(s, OriginAt + 4, Origin.Y); Proto.WriteSingle(s, OriginAt + 8, Origin.Z);
+		Proto.WriteSingle(s, DirectionAt, Direction.X); Proto.WriteSingle(s, DirectionAt + 4, Direction.Y); Proto.WriteSingle(s, DirectionAt + 8, Direction.Z);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(DamageAt), Damage);
 	}
 }
 

@@ -14,10 +14,12 @@ public static class Golden
 	public static readonly (int At, object Value)[] Structs =
 	[
 		(0x0, new Header { Magic = 1413890884u, Version = 3u, MappingSize = 262144u, UnitsPerBlock = 64.0f, DeadlockPid = 4242u, MinecraftPid = 31337u, DeadlockHeartbeatMs = 123456789012ul, MinecraftHeartbeatMs = 123456789000ul }),
-		(0x100, new HeroState { Seq = 42u, Flags = 7u, Tick = 9876543210ul, ServerTime = 154.25f, HeroId = 60u, Position = new Vector3(-1440.0f, 1440.0f, 256.5f), Velocity = new Vector3(305.25f, -33.5f, 0.0f), EyePosition = new Vector3(-1440.0f, 1440.0f, 342.5f), CameraAngles = new Vector3(-35.25f, 35.5f, 0.0f), Stamina = 3.0f, StaminaMax = 4.0f, Health = 756, HealthMax = 822, AbilityEventSerial = 2u, RecenterSerial = 4u, RecenterDelta = new Vector3(1440.0f, -1440.0f, 5743.5f), HullHeight = 52.5f, EntityFlags = 3u }),
+		(0x100, new HeroState { Seq = 42u, Flags = 7u, Tick = 9876543210ul, ServerTime = 154.25f, HeroId = 60u, Position = new Vector3(-1440.0f, 1440.0f, 256.5f), Velocity = new Vector3(305.25f, -33.5f, 0.0f), EyePosition = new Vector3(-1440.0f, 1440.0f, 342.5f), CameraAngles = new Vector3(-35.25f, 35.5f, 0.0f), Stamina = 3.0f, StaminaMax = 4.0f, Health = 756, HealthMax = 822, AbilityEventSerial = 2u, RecenterSerial = 4u, RecenterDelta = new Vector3(1440.0f, -1440.0f, 5743.5f), HullHeight = 52.5f, EntityFlags = 3u, Buttons = 8589936641ul, ShotSerial = 2u }),
 		(0x1000, new McState { Seq = 8u, Flags = 1u, Generation = 3u, CubeCount = 3u, Base = new Int3(-120, -64, 300000), FrameOffset = new Double3(1234.5, -48.25, -299990.5) }),
 		(0x200, new AbilityEvent { Serial = 1u, Kind = 1u, Tick = 9876543000ul, AbilityName = "citadel_ability_dash" }),
 		(0x240, new AbilityEvent { Serial = 2u, Kind = 1u, Tick = 9876543100ul, AbilityName = "ability_unicorn_spirit_jet" }),
+		(0xA00, new Shot { Serial = 1u, Kind = 1u, Tick = 9876543150ul, Origin = new Vector3(-1430.5f, 1436.0f, 330.25f), Direction = new Vector3(-10.5f, 35.5f, 0.0f), Damage = 0u }),
+		(0xA30, new Shot { Serial = 2u, Kind = 2u, Tick = 9876543151ul, Origin = new Vector3(-900.0f, 1820.0f, 256.0f), Direction = new Vector3(0.0f, 0.0f, 1.0f), Damage = 0u }),
 		(0x1040, new Cube { X = (short)0, Y = (short)0, Z = (short)0, Edge = (byte)16 }),
 		(0x1048, new Cube { X = (short)-2, Y = (short)8, Z = (short)30, Edge = (byte)2 }),
 		(0x1050, new Cube { X = (short)31, Y = (short)9, Z = (short)-1, Edge = (byte)1 }),

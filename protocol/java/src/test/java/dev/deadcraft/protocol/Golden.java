@@ -14,10 +14,12 @@ final class Golden {
 	static List<At> structs() {
 		return List.of(
 			new At(0x0, make(new Header(), v -> { v.magic = 1413890884; v.version = 3; v.mappingSize = 262144; v.unitsPerBlock = 64.0f; v.deadlockPid = 4242; v.minecraftPid = 31337; v.deadlockHeartbeatMs = 123456789012L; v.minecraftHeartbeatMs = 123456789000L; })),
-			new At(0x100, make(new HeroState(), v -> { v.seq = 42; v.flags = 7; v.tick = 9876543210L; v.serverTime = 154.25f; v.heroId = 60; v.position = new Vec3(-1440.0f, 1440.0f, 256.5f); v.velocity = new Vec3(305.25f, -33.5f, 0.0f); v.eyePosition = new Vec3(-1440.0f, 1440.0f, 342.5f); v.cameraAngles = new Vec3(-35.25f, 35.5f, 0.0f); v.stamina = 3.0f; v.staminaMax = 4.0f; v.health = 756; v.healthMax = 822; v.abilityEventSerial = 2; v.recenterSerial = 4; v.recenterDelta = new Vec3(1440.0f, -1440.0f, 5743.5f); v.hullHeight = 52.5f; v.entityFlags = 3; })),
+			new At(0x100, make(new HeroState(), v -> { v.seq = 42; v.flags = 7; v.tick = 9876543210L; v.serverTime = 154.25f; v.heroId = 60; v.position = new Vec3(-1440.0f, 1440.0f, 256.5f); v.velocity = new Vec3(305.25f, -33.5f, 0.0f); v.eyePosition = new Vec3(-1440.0f, 1440.0f, 342.5f); v.cameraAngles = new Vec3(-35.25f, 35.5f, 0.0f); v.stamina = 3.0f; v.staminaMax = 4.0f; v.health = 756; v.healthMax = 822; v.abilityEventSerial = 2; v.recenterSerial = 4; v.recenterDelta = new Vec3(1440.0f, -1440.0f, 5743.5f); v.hullHeight = 52.5f; v.entityFlags = 3; v.buttons = 8589936641L; v.shotSerial = 2; })),
 			new At(0x1000, make(new McState(), v -> { v.seq = 8; v.flags = 1; v.generation = 3; v.cubeCount = 3; v.base = new Int3(-120, -64, 300000); v.frameOffset = new Double3(1234.5, -48.25, -299990.5); })),
 			new At(0x200, make(new AbilityEvent(), v -> { v.serial = 1; v.kind = 1; v.tick = 9876543000L; v.abilityName = "citadel_ability_dash"; })),
 			new At(0x240, make(new AbilityEvent(), v -> { v.serial = 2; v.kind = 1; v.tick = 9876543100L; v.abilityName = "ability_unicorn_spirit_jet"; })),
+			new At(0xA00, make(new Shot(), v -> { v.serial = 1; v.kind = 1; v.tick = 9876543150L; v.origin = new Vec3(-1430.5f, 1436.0f, 330.25f); v.direction = new Vec3(-10.5f, 35.5f, 0.0f); v.damage = 0; })),
+			new At(0xA30, make(new Shot(), v -> { v.serial = 2; v.kind = 2; v.tick = 9876543151L; v.origin = new Vec3(-900.0f, 1820.0f, 256.0f); v.direction = new Vec3(0.0f, 0.0f, 1.0f); v.damage = 0; })),
 			new At(0x1040, make(new Cube(), v -> { v.x = (short) 0; v.y = (short) 0; v.z = (short) 0; v.edge = 16; })),
 			new At(0x1048, make(new Cube(), v -> { v.x = (short) -2; v.y = (short) 8; v.z = (short) 30; v.edge = 2; })),
 			new At(0x1050, make(new Cube(), v -> { v.x = (short) 31; v.y = (short) 9; v.z = (short) -1; v.edge = 1; }))

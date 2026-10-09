@@ -17,6 +17,8 @@ import org.junit.jupiter.api.Test;
 class HeroRealPackTest {
 	/** No part of the hero is ever further than this from the middle of the body, metres. */
 	private static final double MAX_REACH = 3.0;
+	/** Except the wand: Celeste tosses it about 4 m up while reloading, and catches it. */
+	private static final double MAX_WAND_REACH = 5.0;
 
 	private static HeroModel celeste() throws Exception {
 		Path file = HeroRenderer.heroDirectory().resolve("unicorn.dchero");
@@ -46,13 +48,15 @@ class HeroRealPackTest {
 	@Test
 	void everyClipStaysOnTheBody() throws Exception {
 		HeroModel m = celeste();
+		boolean[] wand = m.subtree("weaponPivot");
 		float[] world = new float[m.nodeCount() * 12], skin = new float[m.skinnedJointCount() * 12];
 		for (HeroModel.Clip c : m.clips.values()) {
 			for (int f = 0; f < c.frames(); f++) {
 				HeroModel.Pose pose = sample(m, c, f / c.fps());
 				m.skin(pose, world, 0, new int[0], new float[0], skin);
-				double reach = reach(m, skin);
+				double reach = reach(m, skin, wand, false), wandReach = reach(m, skin, wand, true);
 				assertTrue(reach < MAX_REACH, c.name() + " frame " + f + " reaches " + reach + " m");
+				assertTrue(wandReach < MAX_WAND_REACH, c.name() + " frame " + f + ": the wand reaches " + wandReach + " m");
 			}
 		}
 	}
@@ -110,8 +114,14 @@ class HeroRealPackTest {
 
 	/** The furthest skinned vertex from the middle of the body (1.2 m up). */
 	private static double reach(HeroModel m, float[] skin) {
+		return reach(m, skin, null, false);
+	}
+
+	/** Reach of the vertices hung mainly from nodes in {@code part} ({@code inPart}) or of the others; all if null. */
+	private static double reach(HeroModel m, float[] skin, boolean[] part, boolean inPart) {
 		double far = 0;
 		for (int v = 0, nv = m.vertexCount(); v < nv; v++) {
+			if (part != null && part[m.skinNodes[m.joints[v * 4]]] != inPart) continue;
 			float x = m.positions[v * 3], y = m.positions[v * 3 + 1], z = m.positions[v * 3 + 2];
 			double px = 0, py = 0, pz = 0;
 			for (int k = 0; k < 4; k++) {

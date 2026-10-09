@@ -28,6 +28,8 @@ HeroState.recenter_serial = 4
 HeroState.recenter_delta = 1440.0, -1440.0, 5743.5
 HeroState.hull_height = 52.5
 HeroState.entity_flags = 3
+HeroState.buttons = 0x200000801
+HeroState.shot_serial = 2
 
 AbilityEvents[0].serial = 1
 AbilityEvents[0].kind = 1
@@ -37,6 +39,19 @@ AbilityEvents[1].serial = 2
 AbilityEvents[1].kind = 1
 AbilityEvents[1].tick = 9876543100
 AbilityEvents[1].ability_name = ability_unicorn_spirit_jet
+
+Shots[0].serial = 1
+Shots[0].kind = 1
+Shots[0].tick = 9876543150
+Shots[0].origin = -1430.5, 1436.0, 330.25
+Shots[0].direction = -10.5, 35.5, 0.0
+Shots[0].damage = 0
+Shots[1].serial = 2
+Shots[1].kind = 2
+Shots[1].tick = 9876543151
+Shots[1].origin = -900.0, 1820.0, 256.0
+Shots[1].direction = 0.0, 0.0, 1.0
+Shots[1].damage = 0
 
 McState.seq = 8
 McState.flags = 1

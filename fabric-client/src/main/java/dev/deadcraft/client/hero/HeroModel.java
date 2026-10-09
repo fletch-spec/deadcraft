@@ -171,6 +171,7 @@ public final class HeroModel {
 	public final class Pose {
 		final float[] trs = new float[nodeCount() * TRS];
 		private float total;
+		private final float[] layerChange = new float[4], layerReference = new float[4];
 
 		public void clear() {
 			java.util.Arrays.fill(trs, 0);
@@ -238,37 +239,78 @@ public final class HeroModel {
 		 * by the change's. The changes are against the bind pose, local to each joint.
 		 */
 		public void addLayer(Clip clip, float time, float weight, boolean[] mask) {
+			addLayer(clip, null, time, weight, mask);
+		}
+
+		/**
+		 * As {@link #addLayer(Clip, float, float, boolean[])}, with the change measured from
+		 * {@code reference} instead of from the bind pose (null: the bind pose). Aim clips are poses
+		 * against the bind pose: looking up is the change from aiming ahead to aiming up.
+		 */
+		public void addLayer(Clip clip, Clip reference, float time, float weight, boolean[] mask) {
 			if (weight <= 0) return;
-			int frames = clip.frames();
-			float f = Math.max(0, Math.min(time * clip.fps(), frames - 1));
-			int f0 = (int) f, f1 = Math.min(f0 + 1, frames - 1);
-			float a = f - f0;
-			float[] l = clip.locals();
+			float[] l = clip.locals(), r = reference == null ? null : reference.locals();
 			int stride = nodeCount() * TRS;
+			float fc = frame(clip, time), fr = reference == null ? 0 : frame(reference, time);
+			int c0 = (int) fc, c1 = next(clip, c0), r0 = (int) fr, r1 = reference == null ? 0 : next(reference, r0);
+			float ca = fc - c0, ra = fr - r0;
+			float[] d = layerChange, ref = layerReference;
 			for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
 				if (!mask[n]) continue;
-				int i = n * TRS, i0 = f0 * stride + i, i1 = f1 * stride + i;
-				// The change's rotation: nlerp between frames, then weighted towards no change. Its translation
-				// (added below) is already relative to the bind pose's.
-				int r = i + 3;
-				float d0 = 0;
-				for (int k = 3; k < 7; k++) d0 += l[i0 + k] * l[i1 + k];
-				float s1 = d0 < 0 ? -1 : 1;
-				float dx = l[i0 + 3] + (s1 * l[i1 + 3] - l[i0 + 3]) * a, dy = l[i0 + 4] + (s1 * l[i1 + 4] - l[i0 + 4]) * a;
-				float dz = l[i0 + 5] + (s1 * l[i1 + 5] - l[i0 + 5]) * a, dw = l[i0 + 6] + (s1 * l[i1 + 6] - l[i0 + 6]) * a;
+				int i = n * TRS;
+				sampleRotation(l, c0 * stride + i, c1 * stride + i, ca, d);
+				if (r != null) {
+					// reference^-1 * clip: the turn from the reference's rotation to the clip's, in the joint's frame.
+					sampleRotation(r, r0 * stride + i, r1 * stride + i, ra, ref);
+					float x = -ref[0], y = -ref[1], z = -ref[2], w = ref[3];
+					float dx = w * d[0] + x * d[3] + y * d[2] - z * d[1];
+					float dy = w * d[1] - x * d[2] + y * d[3] + z * d[0];
+					float dz = w * d[2] + x * d[1] - y * d[0] + z * d[3];
+					float dw = w * d[3] - x * d[0] - y * d[1] - z * d[2];
+					d[0] = dx; d[1] = dy; d[2] = dz; d[3] = dw;
+				}
+				// The change's rotation, weighted towards no change.
+				float dx = d[0], dy = d[1], dz = d[2], dw = d[3];
 				if (dw < 0) {
 					dx = -dx; dy = -dy; dz = -dz; dw = -dw;
 				}
 				dx *= weight; dy *= weight; dz *= weight; dw = 1 + (dw - 1) * weight;
-				float qx = trs[r], qy = trs[r + 1], qz = trs[r + 2], qw = trs[r + 3];
+				int q = i + 3;
+				float qx = trs[q], qy = trs[q + 1], qz = trs[q + 2], qw = trs[q + 3];
 				// base * change: the change turns the joint within its own (local) frame.
-				trs[r] = qw * dx + qx * dw + qy * dz - qz * dy;
-				trs[r + 1] = qw * dy - qx * dz + qy * dw + qz * dx;
-				trs[r + 2] = qw * dz + qx * dy - qy * dx + qz * dw;
-				trs[r + 3] = qw * dw - qx * dx - qy * dy - qz * dz;
-				normalise(trs, r);
-				for (int k = 0; k < 3; k++) trs[i + k] += weight * (l[i0 + k] + (l[i1 + k] - l[i0 + k]) * a);
+				trs[q] = qw * dx + qx * dw + qy * dz - qz * dy;
+				trs[q + 1] = qw * dy - qx * dz + qy * dw + qz * dx;
+				trs[q + 2] = qw * dz + qx * dy - qy * dx + qz * dw;
+				trs[q + 3] = qw * dw - qx * dx - qy * dy - qz * dz;
+				normalise(trs, q);
+				// Translations: the clip's change from the bind pose, or from the reference's.
+				for (int k = 0; k < 3; k++) {
+					float t = l[c0 * stride + i + k] + (l[c1 * stride + i + k] - l[c0 * stride + i + k]) * ca;
+					if (r != null) t -= r[r0 * stride + i + k] + (r[r1 * stride + i + k] - r[r0 * stride + i + k]) * ra;
+					trs[i + k] += weight * t;
+				}
 			}
+		}
+
+		/** The frame (with fraction) at {@code time}: wrapped for a looping clip, held at the ends otherwise. */
+		private static float frame(Clip clip, float time) {
+			int frames = clip.frames();
+			float f = time * clip.fps();
+			return clip.loop() ? ((f % frames) + frames) % frames : Math.max(0, Math.min(f, frames - 1));
+		}
+
+		private static int next(Clip clip, int f) {
+			return clip.loop() ? (f + 1) % clip.frames() : Math.min(f + 1, clip.frames() - 1);
+		}
+
+		/** The rotation between two frames (nlerp), into out (x, y, z, w). */
+		private static void sampleRotation(float[] l, int i0, int i1, float a, float[] out) {
+			float d0 = 0;
+			for (int k = 3; k < 7; k++) d0 += l[i0 + k] * l[i1 + k];
+			float s1 = d0 < 0 ? -1 : 1;
+			for (int k = 0; k < 4; k++) out[k] = l[i0 + 3 + k] + (s1 * l[i1 + 3 + k] - l[i0 + 3 + k]) * a;
+			float len = (float) Math.sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2] + out[3] * out[3]);
+			if (len > 1e-8f) for (int k = 0; k < 4; k++) out[k] /= len;
 		}
 
 		/** Divides out the summed weights and normalises rotations. With nothing added, the rest pose. */
@@ -344,6 +386,8 @@ public final class HeroModel {
 		 */
 		public int follower = -1, grip = -1, leader = -1;
 		public float followerTwist;
+		/** How much of the move into the hand applies: 1 held, 0 let go (from {@link HeroModel#hold}). */
+		public float hold = 1;
 	}
 
 	/**
@@ -366,9 +410,11 @@ public final class HeroModel {
 	 * inherit them, so shares add up along a chain (spine to head, the ponytail). The weapon then goes to
 	 * the hand: Celeste's weapon hangs off the skeleton's root and Deadlock pulls her hand onto it at
 	 * runtime; in every clip her hand sits exactly on the weapon's grip, but blends, layers and the twist
-	 * move the two apart, so the weapon keeps its animated turn and is placed in the hand.
+	 * move the two apart, so the weapon keeps its animated turn and is placed in the hand. Unless the
+	 * clips have let go of it (Celeste tosses her wand up while reloading): see {@link Rig#hold}.
 	 */
 	public void skin(Pose pose, float[] world, Rig rig, float[] out) {
+		float hold = rig.follower >= 0 && rig.grip >= 0 && rig.leader >= 0 ? rig.hold : 0;
 		for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
 			int o = n * 12;
 			local(pose.trs, n, world, o, parents[n] < 0 ? null : world, parents[n] * 12);
@@ -383,17 +429,17 @@ public final class HeroModel {
 				}
 			}
 		}
-		if (rig.follower >= 0 && rig.grip >= 0 && rig.leader >= 0) {
+		if (hold > 0) {
 			boolean[] below = new boolean[nodeCount()];
 			below[rig.follower] = true;
 			for (int n = rig.follower + 1; n < below.length; n++) below[n] = parents[n] >= 0 && below[parents[n]];
 			float gx = world[rig.grip * 12 + 3], gz = world[rig.grip * 12 + 11];
 			if (rig.followerTwist != 0) {
-				for (int n = 0; n < below.length; n++) if (below[n]) turnAboutUp(world, n * 12, rig.followerTwist, gx, gz);
+				for (int n = 0; n < below.length; n++) if (below[n]) turnAboutUp(world, n * 12, rig.followerTwist * hold, gx, gz);
 			}
-			float dx = world[rig.leader * 12 + 3] - world[rig.grip * 12 + 3];
-			float dy = world[rig.leader * 12 + 7] - world[rig.grip * 12 + 7];
-			float dz = world[rig.leader * 12 + 11] - world[rig.grip * 12 + 11];
+			float dx = (world[rig.leader * 12 + 3] - world[rig.grip * 12 + 3]) * hold;
+			float dy = (world[rig.leader * 12 + 7] - world[rig.grip * 12 + 7]) * hold;
+			float dz = (world[rig.leader * 12 + 11] - world[rig.grip * 12 + 11]) * hold;
 			for (int n = 0; n < below.length; n++) {
 				if (!below[n]) continue;
 				world[n * 12 + 3] += dx;
@@ -407,6 +453,35 @@ public final class HeroModel {
 			mul(world, skinNodes[s] * 12, m[ib], m[ib + 1], m[ib + 2], m[ib + 3], m[ib + 4], m[ib + 5], m[ib + 6], m[ib + 7],
 				m[ib + 8], m[ib + 9], m[ib + 10], m[ib + 11], out, s * 12);
 		}
+	}
+
+	/** The grip counts as in the hand up to HOLD_NEAR metres apart in the pose, and let go beyond HOLD_FAR. */
+	static final float HOLD_NEAR = 0.1f, HOLD_FAR = 0.35f;
+	private final float[] chain = new float[24];
+
+	/**
+	 * How firmly {@code pose} holds {@code grip} in {@code hand}: 1 together, 0 apart (thrown), eased
+	 * between. Measure it on the clips alone: layers and the twist move the hand and not the weapon.
+	 */
+	public float hold(Pose pose, int grip, int hand) {
+		if (grip < 0 || hand < 0) return 1;
+		float gx = chainPosition(pose, grip), gy = chain[7], gz = chain[11];
+		float hx = chainPosition(pose, hand), hy = chain[7], hz = chain[11];
+		float d = (float) Math.sqrt((gx - hx) * (gx - hx) + (gy - hy) * (gy - hy) + (gz - hz) * (gz - hz));
+		float x = Math.max(0, Math.min(1, (HOLD_FAR - d) / (HOLD_FAR - HOLD_NEAR)));
+		return x * x * (3 - 2 * x);
+	}
+
+	/** World x of {@code node} from the pose alone (no rig), leaving its 3x4 in chain[0..12]. */
+	private float chainPosition(Pose pose, int node) {
+		if (parents[node] < 0) {
+			local(pose.trs, node, chain, 0, null, 0);
+		} else {
+			chainPosition(pose, parents[node]);
+			System.arraycopy(chain, 0, chain, 12, 12);
+			local(pose.trs, node, chain, 0, chain, 12);
+		}
+		return chain[3];
 	}
 
 	/** Whether {@code ancestor} is {@code node} or above it. */

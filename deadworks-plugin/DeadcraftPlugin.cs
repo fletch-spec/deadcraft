@@ -41,8 +41,74 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	private string? _bridgeProblem;
 	private float _lastHull;
 	private uint _lastEntityFlags;
+	// Buttons the player holds, from the ability system's think (the only per-tick input Deadworks shows).
+	private ulong _buttons, _loggedButtons;
+	private CCitadelPlayerPawn? _abilitiesLoggedFor;
+	// Logged when they change: fire, alt fire, reload, abilities 1 to 4, melee isn't a button (an event).
+	private const ulong LoggedButtons = (ulong)(InputButton.Attack | InputButton.Attack2 | InputButton.Reload | InputButton.AllAbilities);
 
-	public override void OnLoad(bool isReload) => TryOpenBridge();
+	private readonly List<IHandle> _hooks = new();
+	private int _shotsLogged;
+
+	public override void OnLoad(bool isReload)
+	{
+		TryOpenBridge();
+		// The server's own record of each shot (fired: muzzle and aim; impact: where it hit): exact shot
+		// timing for the animation, and impacts Minecraft can draw to check its crosshair against Deadlock's.
+		try
+		{
+			_hooks.Add(NetMessages.HookOutgoing<CMsgFireBullets>(OnFireBullets));
+			_hooks.Add(NetMessages.HookOutgoing<CMsgBulletImpact>(OnBulletImpact));
+		}
+		catch (InvalidOperationException e)
+		{
+			Log($"can't watch shots: {e.Message}");
+		}
+	}
+
+	private HookResult OnFireBullets(OutgoingMessageContext<CMsgFireBullets> context)
+	{
+		var m = context.Message;
+		bool ours = IsHeroEntity(m.ShooterEntity, out string why);
+		LogShot($"fired from ({m.Origin?.X:F0}, {m.Origin?.Y:F0}, {m.Origin?.Z:F0}) angles ({m.Angles?.X:F1}, {m.Angles?.Y:F1}) shooter {why}{(ours ? "" : " (not the hero)")}");
+		if (!ours) return HookResult.Continue;
+		_mapping?.AppendShot(new Shot
+		{
+			Kind = (uint)ShotKind.Fired, Tick = (ulong)GlobalVars.TickCount,
+			Origin = m.Origin is { } o ? new Vector3(o.X, o.Y, o.Z) : Vector3.Zero,
+			Direction = m.Angles is { } a ? new Vector3(a.X, a.Y, a.Z) : Vector3.Zero,
+		});
+		return HookResult.Continue;
+	}
+
+	private HookResult OnBulletImpact(OutgoingMessageContext<CMsgBulletImpact> context)
+	{
+		var m = context.Message;
+		bool ours = IsHeroEntity(unchecked((int)m.ShooterEhandle), out string why);
+		LogShot($"impact at ({m.ImpactOrigin?.X:F0}, {m.ImpactOrigin?.Y:F0}, {m.ImpactOrigin?.Z:F0}) damage {m.Damage} shooter {why}{(ours ? "" : " (not the hero)")}");
+		if (!ours) return HookResult.Continue;
+		_mapping?.AppendShot(new Shot
+		{
+			Kind = (uint)ShotKind.Impact, Tick = (ulong)GlobalVars.TickCount, Damage = m.Damage,
+			Origin = m.ImpactOrigin is { } o ? new Vector3(o.X, o.Y, o.Z) : Vector3.Zero,
+			Direction = m.SurfaceNormal is { } n ? new Vector3(n.X, n.Y, n.Z) : Vector3.Zero,
+		});
+		return HookResult.Continue;
+	}
+
+	// Shooters come as an entity index or a handle (not yet known which for each message): accept either.
+	private bool IsHeroEntity(int value, out string why)
+	{
+		why = $"{value} (0x{value:X}; hero index {_hero?.EntityIndex}, handle 0x{_hero?.EntityHandle:X})";
+		if (_hero == null || !_hero.IsValid) return false;
+		return value == _hero.EntityIndex || unchecked((uint)value) == _hero.EntityHandle || (value & 0x3FFF) == _hero.EntityIndex;
+	}
+
+	// The first shots of each session, to learn what the messages hold.
+	private void LogShot(string text)
+	{
+		if (_shotsLogged++ < 40) Log(text);
+	}
 
 	// A mapping held open by a Minecraft client on another protocol version can't be used; retry until
 	// that client closes (or restarts on a matching build) instead of needing a server restart.
@@ -66,6 +132,8 @@ public class DeadcraftPlugin : DeadworksPluginBase
 
 	public override void OnUnload()
 	{
+		foreach (var hook in _hooks) hook.Cancel();
+		_hooks.Clear();
 		_colliders.Clear();
 		if (_mapping == null) return;
 		_mapping.WriteHeroState(new HeroState());  // flags 0: no hero
@@ -103,6 +171,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			var flags = HeroFlags.Present;
 			if (hero.IsAlive) flags |= HeroFlags.Alive;
 			if (hero.IsOnGround) flags |= HeroFlags.OnGround;
+			if (Channeling(hero)) flags |= HeroFlags.Channeling;
 			var stamina = hero.AbilityComponent.ResourceStamina;
 			state.Flags = (uint)flags;
 			state.HeroId = (uint)hero.HeroID;
@@ -115,8 +184,20 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			state.StaminaMax = stamina.MaxValue;
 			state.Health = hero.Health;
 			state.HealthMax = hero.GetMaxHealth();
-			state.HullHeight = hero.Collision.Maxs.Z - hero.Collision.Mins.Z;
+			state.HullHeight = hero.Collision is { } collision ? collision.Maxs.Z - collision.Mins.Z : 0f;
 			state.EntityFlags = (uint)hero.Flags;
+			state.Buttons = _buttons;
+			if ((_buttons & LoggedButtons) != _loggedButtons)
+			{
+				_loggedButtons = _buttons & LoggedButtons;
+				Log($"buttons {(InputButton)_loggedButtons}");
+			}
+			if (_abilitiesLoggedFor != hero && hero.IsAlive)
+			{
+				// What this hero's ability events will be called (Celeste's are only known from here).
+				_abilitiesLoggedFor = hero;
+				Log("abilities: " + string.Join(", ", hero.AbilityComponent.Abilities.Select(a => $"{a.AbilitySlot}={a.AbilityName}")));
+			}
 			if (state.HullHeight != _lastHull || state.EntityFlags != _lastEntityFlags)
 			{
 				// Learning what slides and crouches look like from here (no flag for either in Deadworks).
@@ -185,6 +266,19 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		Log($"recentred by {delta} (hero was at {p}, now {hero.Position}) tick {GlobalVars.TickCount}");
 	}
 
+	private static readonly EAbilitySlot[] SignatureSlots = [EAbilitySlot.Signature1, EAbilitySlot.Signature2, EAbilitySlot.Signature3, EAbilitySlot.Signature4];
+	private bool _wasChanneling;
+
+	private bool Channeling(CCitadelPlayerPawn hero)
+	{
+		bool channeling = false;
+		foreach (var slot in SignatureSlots)
+			if (hero.AbilityComponent.GetAbilityBySlot(slot) is { IsChanneling: true }) channeling = true;
+		if (channeling != _wasChanneling) Log(channeling ? "channelling started" : "channelling ended");
+		_wasChanneling = channeling;
+		return channeling;
+	}
+
 	// The human player's hero, re-found when it changes (respawn, hero swap, reconnect).
 	private CCitadelPlayerPawn? FindHero()
 	{
@@ -203,6 +297,12 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			Log($"{humans} human players on this server; bridging only the first. Each player needs their own server.");
 		}
 		return _hero;
+	}
+
+	public override void OnAbilityAttempt(AbilityAttemptEvent args)
+	{
+		if (_hero != null && _hero.IsValid && _hero.Controller is { } controller && args.PlayerSlot == controller.Slot)
+			_buttons = (ulong)args.HeldButtons;
 	}
 
 	[GameEventHandler("player_used_ability")]

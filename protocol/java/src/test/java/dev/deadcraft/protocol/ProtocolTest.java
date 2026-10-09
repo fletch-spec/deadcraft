@@ -26,6 +26,7 @@ class ProtocolTest {
 				case Header h -> h.write(b, at.offset());
 				case HeroState s -> s.write(b, at.offset());
 				case AbilityEvent e -> e.write(b, at.offset());
+				case Shot sh -> sh.write(b, at.offset());
 				case McState m -> m.write(b, at.offset());
 				case Cube c -> c.write(b, at.offset());
 				default -> throw new IllegalStateException(at.value().getClass().getName());
@@ -42,6 +43,7 @@ class ProtocolTest {
 				case Header h -> Header.read(b, at.offset());
 				case HeroState s -> HeroState.read(b, at.offset());
 				case AbilityEvent e -> AbilityEvent.read(b, at.offset());
+				case Shot sh -> Shot.read(b, at.offset());
 				case McState m -> McState.read(b, at.offset());
 				case Cube c -> Cube.read(b, at.offset());
 				default -> throw new IllegalStateException(at.value().getClass().getName());

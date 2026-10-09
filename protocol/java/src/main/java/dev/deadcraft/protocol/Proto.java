@@ -6,13 +6,16 @@ public final class Proto {
 	private Proto() {}
 
 	public static final int MAGIC = 0x54464344;
-	public static final int VERSION = 4;
+	public static final int VERSION = 5;
 	public static final String MAPPING_NAME = "Local\\Deadcraft";
 	public static final int MAPPING_SIZE = 262144;
 	public static final float UNITS_PER_BLOCK = 64.0f;
 
 	public static final int ABILITY_EVENTS_OFFSET = 0x200;
 	public static final int ABILITY_EVENTS_CAPACITY = 32;
+
+	public static final int SHOTS_OFFSET = 0xA00;
+	public static final int SHOTS_CAPACITY = 32;
 
 	public static final int CUBES_OFFSET = 0x1040;
 	public static final int CUBES_CAPACITY = 16384;

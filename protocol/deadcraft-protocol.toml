@@ -12,7 +12,7 @@
 
 [protocol]
 magic = 0x54464344          # bytes "DCFT"
-version = 4
+version = 5
 mapping_name = 'Local\Deadcraft'
 mapping_size = 262144
 units_per_block = 64.0      # Source units per Minecraft block (docs/collider-test.md)
@@ -44,7 +44,7 @@ fields = [
 [[struct]]
 name = "HeroState"
 offset = 0x100
-size = 0x80
+size = 0x100
 seqlock = true
 doc = "Deadlock -> Minecraft, written every server tick. Seqlock: seq is odd while the plugin writes."
 fields = [
@@ -66,6 +66,8 @@ fields = [
   { name = "recenter_delta", type = "vec3", offset = 0x60, doc = "Source units the hero and every collider moved in the latest recentre" },
   { name = "hull_height", type = "f32", offset = 0x6C, doc = "collision box height, Source units (shrinks when crouching or sliding)" },
   { name = "entity_flags", type = "u32", offset = 0x70, doc = "the engine's entity flag bits (on ground, ducking, ...)" },
+  { name = "buttons", type = "u64", offset = 0x78, doc = "buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)" },
+  { name = "shot_serial", type = "u32", offset = 0x80, doc = "serial of the newest Shot" },
 ]
 
 [[flags]]
@@ -74,6 +76,7 @@ values = [
   { name = "present", bit = 0, doc = "a human player's hero pawn exists" },
   { name = "alive", bit = 1 },
   { name = "on_ground", bit = 2 },
+  { name = "channeling", bit = 3, doc = "one of the hero's signature abilities is channelling (e.g. Celeste holding her Dazzling Orb)" },
 ]
 
 [[ring]]
@@ -100,6 +103,33 @@ fields = [
 name = "AbilityEventKind"
 values = [
   { name = "used", value = 1, doc = "player_used_ability" },
+]
+
+[[ring]]
+name = "Shots"
+offset = 0xA00
+entry = "Shot"
+capacity = 32
+doc = """Deadlock -> Minecraft: the hero's shots as the server fires them, and where they hit. Filled like AbilityEvents, with HeroState.shot_serial."""
+
+[[struct]]
+name = "Shot"
+size = 0x30
+doc = "One bullet fired (origin and aim) or one impact (where it hit, and the surface normal)."
+fields = [
+  { name = "serial", type = "u32", offset = 0x00 },
+  { name = "kind", type = "u32", offset = 0x04, doc = "ShotKind" },
+  { name = "tick", type = "u64", offset = 0x08 },
+  { name = "origin", type = "vec3", offset = 0x10, doc = "fired: muzzle; impact: hit point (Source units)" },
+  { name = "direction", type = "vec3", offset = 0x1C, doc = "fired: pitch, yaw, roll in degrees; impact: surface normal" },
+  { name = "damage", type = "u32", offset = 0x28, doc = "impact: damage dealt (0 on world geometry)" },
+]
+
+[[enum]]
+name = "ShotKind"
+values = [
+  { name = "fired", value = 1, doc = "CMsgFireBullets" },
+  { name = "impact", value = 2, doc = "CMsgBulletImpact" },
 ]
 
 # ---- Minecraft -> Deadlock ---------------------------------------------------------------------

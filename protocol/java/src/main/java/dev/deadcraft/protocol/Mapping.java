@@ -181,6 +181,17 @@ public final class Mapping implements AutoCloseable {
 		return Optional.of(AbilityEvent.read(b, 0));
 	}
 
+	/** The shot with this serial, or empty if it was overwritten or not written yet. */
+	public Optional<Shot> readShot(int serial) {
+		long at = Proto.SHOTS_OFFSET + (long) Integer.remainderUnsigned(serial - 1, Proto.SHOTS_CAPACITY) * Shot.SIZE;
+		if (view.get(INT, at + Shot.SERIAL_AT) != serial) return Optional.empty();
+		VarHandle.acquireFence();
+		ByteBuffer b = copy(at, Shot.SIZE);
+		VarHandle.acquireFence();
+		if (view.get(INT, at + Shot.SERIAL_AT) != serial) return Optional.empty();
+		return Optional.of(Shot.read(b, 0));
+	}
+
 	/** Marks the Minecraft side alive: its process id and GetTickCount64. */
 	public void minecraftHeartbeat() {
 		view.set(INT, Header.OFFSET + Header.MINECRAFT_PID_AT, currentProcessId());

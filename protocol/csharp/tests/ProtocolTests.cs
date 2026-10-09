@@ -19,6 +19,7 @@ public class ProtocolTests
 				case Header h: h.Write(span); break;
 				case HeroState s: s.Write(span); break;
 				case AbilityEvent e: e.Write(span); break;
+				case Shot sh: sh.Write(span); break;
 				case McState m: m.Write(span); break;
 				case Cube c: c.Write(span); break;
 				default: throw new InvalidOperationException(value.GetType().Name);
@@ -38,6 +39,7 @@ public class ProtocolTests
 				Header => Header.Read(span),
 				HeroState => HeroState.Read(span),
 				AbilityEvent => AbilityEvent.Read(span),
+				Shot => Shot.Read(span),
 				McState => McState.Read(span),
 				Cube => Cube.Read(span),
 				_ => throw new InvalidOperationException(expected.GetType().Name),
@@ -71,6 +73,20 @@ public class ProtocolTests
 		Assert.Equal(500, read.Health);
 		Assert.Equal("citadel_ability_dash", mapping.TryReadAbilityEvent(1)?.AbilityName);
 		Assert.Null(mapping.TryReadAbilityEvent(2));
+	}
+
+	[Fact]
+	public void RoundTripsShots()
+	{
+		using var mapping = Mapping.OpenOrCreate($@"Local\DeadcraftTest_{Guid.NewGuid():N}");
+		for (int i = 0; i < Proto.ShotsCapacity + 3; i++)
+			mapping.AppendShot(new Shot { Kind = (uint)ShotKind.Fired, Tick = (ulong)i, Origin = new Vector3(i, 0, 0) });
+		mapping.WriteHeroState(new HeroState());
+		Assert.True(mapping.TryReadHeroState(out var read));
+		uint newest = read.ShotSerial;
+		Assert.Equal((uint)Proto.ShotsCapacity + 3, newest);
+		Assert.Equal(new Vector3(newest - 1, 0, 0), mapping.TryReadShot(newest)?.Origin);
+		Assert.Null(mapping.TryReadShot(3));  // overwritten
 	}
 
 	[Fact]

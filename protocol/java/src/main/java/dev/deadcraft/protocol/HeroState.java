@@ -6,7 +6,7 @@ import java.nio.ByteBuffer;
 /** Deadlock -> Minecraft, written every server tick. Seqlock: seq is odd while the plugin writes. */
 public final class HeroState {
 	public static final int OFFSET = 0x100;
-	public static final int SIZE = 0x80;
+	public static final int SIZE = 0x100;
 	public static final int SEQ_AT = 0x0;
 	public static final int FLAGS_AT = 0x4;
 	public static final int TICK_AT = 0x8;
@@ -25,6 +25,8 @@ public final class HeroState {
 	public static final int RECENTER_DELTA_AT = 0x60;
 	public static final int HULL_HEIGHT_AT = 0x6C;
 	public static final int ENTITY_FLAGS_AT = 0x70;
+	public static final int BUTTONS_AT = 0x78;
+	public static final int SHOT_SERIAL_AT = 0x80;
 
 	public int seq;  // unsigned
 	public int flags;  // HeroFlags
@@ -44,6 +46,8 @@ public final class HeroState {
 	public Vec3 recenterDelta = Vec3.ZERO;  // Source units the hero and every collider moved in the latest recentre
 	public float hullHeight;  // collision box height, Source units (shrinks when crouching or sliding)
 	public int entityFlags;  // the engine's entity flag bits (on ground, ducking, ...)
+	public long buttons;  // buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)
+	public int shotSerial;  // serial of the newest Shot
 
 	/** Decode from a little-endian buffer; {@code at} is where this struct starts. */
 	public static HeroState read(ByteBuffer b, int at) {
@@ -66,6 +70,8 @@ public final class HeroState {
 		v.recenterDelta = new Vec3(b.getFloat(at + RECENTER_DELTA_AT), b.getFloat(at + RECENTER_DELTA_AT + 4), b.getFloat(at + RECENTER_DELTA_AT + 8));
 		v.hullHeight = b.getFloat(at + HULL_HEIGHT_AT);
 		v.entityFlags = b.getInt(at + ENTITY_FLAGS_AT);
+		v.buttons = b.getLong(at + BUTTONS_AT);
+		v.shotSerial = b.getInt(at + SHOT_SERIAL_AT);
 		return v;
 	}
 
@@ -89,6 +95,8 @@ public final class HeroState {
 		b.putFloat(at + RECENTER_DELTA_AT, recenterDelta.x()).putFloat(at + RECENTER_DELTA_AT + 4, recenterDelta.y()).putFloat(at + RECENTER_DELTA_AT + 8, recenterDelta.z());
 		b.putFloat(at + HULL_HEIGHT_AT, hullHeight);
 		b.putInt(at + ENTITY_FLAGS_AT, entityFlags);
+		b.putLong(at + BUTTONS_AT, buttons);
+		b.putInt(at + SHOT_SERIAL_AT, shotSerial);
 	}
 
 	@Override
@@ -111,16 +119,18 @@ public final class HeroState {
 			&& recenterSerial == v.recenterSerial
 			&& recenterDelta.equals(v.recenterDelta)
 			&& Float.compare(hullHeight, v.hullHeight) == 0
-			&& entityFlags == v.entityFlags;
+			&& entityFlags == v.entityFlags
+			&& buttons == v.buttons
+			&& shotSerial == v.shotSerial;
 	}
 
 	@Override
 	public int hashCode() {
-		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial, recenterSerial, recenterDelta, hullHeight, entityFlags);
+		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial, recenterSerial, recenterDelta, hullHeight, entityFlags, buttons, shotSerial);
 	}
 
 	@Override
 	public String toString() {
-		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + ", " + "recenterSerial=" + recenterSerial + ", " + "recenterDelta=" + recenterDelta + ", " + "hullHeight=" + hullHeight + ", " + "entityFlags=" + entityFlags + "]";
+		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + ", " + "recenterSerial=" + recenterSerial + ", " + "recenterDelta=" + recenterDelta + ", " + "hullHeight=" + hullHeight + ", " + "entityFlags=" + entityFlags + ", " + "buttons=" + buttons + ", " + "shotSerial=" + shotSerial + "]";
 	}
 }

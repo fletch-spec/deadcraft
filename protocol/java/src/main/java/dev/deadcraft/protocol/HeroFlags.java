@@ -8,4 +8,5 @@ public final class HeroFlags {
 	public static final int PRESENT = 1 << 0;
 	public static final int ALIVE = 1 << 1;
 	public static final int ON_GROUND = 1 << 2;
+	public static final int CHANNELING = 1 << 3;
 }
