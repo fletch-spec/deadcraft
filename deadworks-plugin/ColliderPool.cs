@@ -20,6 +20,8 @@ internal sealed class ColliderPool
 	private static readonly Vector3 ParkAt = new(0f, 0f, -12000f);
 	// Our own safety cap, not Deadlock's: raise it as stress tests show what Deadlock handles.
 	private const int MaxColliders = 8000;
+	/// <summary>False to see the colliders in Deadlock while debugging.</summary>
+	public static bool HideColliders = true;
 
 	private readonly record struct Key(int X, int Y, int Z, byte Edge);
 
@@ -151,6 +153,10 @@ internal sealed class ColliderPool
 		ekv.SetVector("origin", Place(key));
 		ekv.SetInt("solid", (int)SolidType.VPhysics);
 		ekv.SetFloat("ModelScale", Scale(key.Edge));
+		// Never drawn: Minecraft draws the world, and thousands of cubes cost Deadlock's GPU time that
+		// Minecraft, sharing the GPU, needs (it waited on the GPU most of each frame while moving).
+		// rendermode 10 is kRenderNone; collision doesn't depend on it.
+		if (HideColliders) ekv.SetInt("rendermode", 10);
 		entity.Spawn(ekv);
 		return entity;
 	}
