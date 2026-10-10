@@ -292,6 +292,13 @@ public final class HeroModel {
 			}
 		}
 
+		/** Moves a node's translation by (dx, dy, dz), in its parent's frame. */
+		public void translate(int node, float dx, float dy, float dz) {
+			trs[node * TRS] += dx;
+			trs[node * TRS + 1] += dy;
+			trs[node * TRS + 2] += dz;
+		}
+
 		/** The frame (with fraction) at {@code time}: wrapped for a looping clip, held at the ends otherwise. */
 		private static float frame(Clip clip, float time) {
 			int frames = clip.frames();
@@ -355,6 +362,14 @@ public final class HeroModel {
 		}
 	}
 
+	/** Component {@code k} (0 x, 1 y, 2 z) of a node's translation in a clip at {@code time}, interpolated. */
+	public float translation(Clip clip, int node, int k, float time) {
+		float f = Pose.frame(clip, time);
+		int f0 = (int) f, f1 = Pose.next(clip, f0), stride = nodeCount() * TRS, i = node * TRS + k;
+		float[] l = clip.locals();
+		return l[f0 * stride + i] + (l[f1 * stride + i] - l[f0 * stride + i]) * (f - f0);
+	}
+
 	public Pose newPose() {
 		return new Pose();
 	}
@@ -386,8 +401,6 @@ public final class HeroModel {
 		 */
 		public int follower = -1, grip = -1, leader = -1;
 		public float followerTwist;
-		/** How much of the move into the hand applies: 1 held, 0 let go (from {@link HeroModel#hold}). */
-		public float hold = 1;
 	}
 
 	/**
@@ -410,11 +423,11 @@ public final class HeroModel {
 	 * inherit them, so shares add up along a chain (spine to head, the ponytail). The weapon then goes to
 	 * the hand: Celeste's weapon hangs off the skeleton's root and Deadlock pulls her hand onto it at
 	 * runtime; in every clip her hand sits exactly on the weapon's grip, but blends, layers and the twist
-	 * move the two apart, so the weapon keeps its animated turn and is placed in the hand. Unless the
-	 * clips have let go of it (Celeste tosses her wand up while reloading): see {@link Rig#hold}.
+	 * move the two apart, so the weapon keeps its animated turn and is placed in the hand. (The grip is
+	 * the hand's target, not part of the weapon: when Celeste tosses her wand up while reloading, the
+	 * grip stays in her hand and the wand flies relative to it, so the toss survives this.)
 	 */
 	public void skin(Pose pose, float[] world, Rig rig, float[] out) {
-		float hold = rig.follower >= 0 && rig.grip >= 0 && rig.leader >= 0 ? rig.hold : 0;
 		for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
 			int o = n * 12;
 			local(pose.trs, n, world, o, parents[n] < 0 ? null : world, parents[n] * 12);
@@ -429,17 +442,17 @@ public final class HeroModel {
 				}
 			}
 		}
-		if (hold > 0) {
+		if (rig.follower >= 0 && rig.grip >= 0 && rig.leader >= 0) {
 			boolean[] below = new boolean[nodeCount()];
 			below[rig.follower] = true;
 			for (int n = rig.follower + 1; n < below.length; n++) below[n] = parents[n] >= 0 && below[parents[n]];
 			float gx = world[rig.grip * 12 + 3], gz = world[rig.grip * 12 + 11];
 			if (rig.followerTwist != 0) {
-				for (int n = 0; n < below.length; n++) if (below[n]) turnAboutUp(world, n * 12, rig.followerTwist * hold, gx, gz);
+				for (int n = 0; n < below.length; n++) if (below[n]) turnAboutUp(world, n * 12, rig.followerTwist, gx, gz);
 			}
-			float dx = (world[rig.leader * 12 + 3] - world[rig.grip * 12 + 3]) * hold;
-			float dy = (world[rig.leader * 12 + 7] - world[rig.grip * 12 + 7]) * hold;
-			float dz = (world[rig.leader * 12 + 11] - world[rig.grip * 12 + 11]) * hold;
+			float dx = world[rig.leader * 12 + 3] - world[rig.grip * 12 + 3];
+			float dy = world[rig.leader * 12 + 7] - world[rig.grip * 12 + 7];
+			float dz = world[rig.leader * 12 + 11] - world[rig.grip * 12 + 11];
 			for (int n = 0; n < below.length; n++) {
 				if (!below[n]) continue;
 				world[n * 12 + 3] += dx;
@@ -453,35 +466,6 @@ public final class HeroModel {
 			mul(world, skinNodes[s] * 12, m[ib], m[ib + 1], m[ib + 2], m[ib + 3], m[ib + 4], m[ib + 5], m[ib + 6], m[ib + 7],
 				m[ib + 8], m[ib + 9], m[ib + 10], m[ib + 11], out, s * 12);
 		}
-	}
-
-	/** The grip counts as in the hand up to HOLD_NEAR metres apart in the pose, and let go beyond HOLD_FAR. */
-	static final float HOLD_NEAR = 0.1f, HOLD_FAR = 0.35f;
-	private final float[] chain = new float[24];
-
-	/**
-	 * How firmly {@code pose} holds {@code grip} in {@code hand}: 1 together, 0 apart (thrown), eased
-	 * between. Measure it on the clips alone: layers and the twist move the hand and not the weapon.
-	 */
-	public float hold(Pose pose, int grip, int hand) {
-		if (grip < 0 || hand < 0) return 1;
-		float gx = chainPosition(pose, grip), gy = chain[7], gz = chain[11];
-		float hx = chainPosition(pose, hand), hy = chain[7], hz = chain[11];
-		float d = (float) Math.sqrt((gx - hx) * (gx - hx) + (gy - hy) * (gy - hy) + (gz - hz) * (gz - hz));
-		float x = Math.max(0, Math.min(1, (HOLD_FAR - d) / (HOLD_FAR - HOLD_NEAR)));
-		return x * x * (3 - 2 * x);
-	}
-
-	/** World x of {@code node} from the pose alone (no rig), leaving its 3x4 in chain[0..12]. */
-	private float chainPosition(Pose pose, int node) {
-		if (parents[node] < 0) {
-			local(pose.trs, node, chain, 0, null, 0);
-		} else {
-			chainPosition(pose, parents[node]);
-			System.arraycopy(chain, 0, chain, 12, 12);
-			local(pose.trs, node, chain, 0, chain, 12);
-		}
-		return chain[3];
 	}
 
 	/** Whether {@code ancestor} is {@code node} or above it. */

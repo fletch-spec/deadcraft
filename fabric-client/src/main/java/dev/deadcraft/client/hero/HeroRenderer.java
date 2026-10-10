@@ -57,6 +57,8 @@ public final class HeroRenderer {
 	 * face it, overshooting by STEP_LEAD, in STEP_S seconds.
 	 */
 	private static final float IDLE_TURN_START = 55f, STEP_LEAD = 10f, STEP_S = 0.3f;
+	/** In weapon stance the feet follow sooner, so the body stays square to where she aims (a guess, tune by eye). */
+	private static final float COMBAT_TURN_START = 30f;
 	private static float stepTime = -1, stepFrom, stepBy;
 
 	private HeroRenderer() {}
@@ -73,6 +75,11 @@ public final class HeroRenderer {
 
 	public static boolean sliding() {
 		return animator != null && animator.sliding();
+	}
+
+	/** The server fired one of the hero's shots. */
+	public static void shot() {
+		if (animator != null) animator.shot();
 	}
 
 	/** A Deadlock ability was used: movement abilities start animation moves. */
@@ -147,7 +154,7 @@ public final class HeroRenderer {
 			// Standing: the head turns alone until it reaches its limit, then the feet take one quick step
 			// round to face the camera (a little past it, in the turn's direction) and stop, as in
 			// Deadlock: head, step, head, step. A turn that keeps going takes another step.
-			if (stepTime < 0 && Math.abs(diff) > IDLE_TURN_START) {
+			if (stepTime < 0 && Math.abs(diff) > (animator.inCombat() ? COMBAT_TURN_START : IDLE_TURN_START)) {
 				stepFrom = bodyYaw;
 				stepBy = diff + Math.signum(diff) * STEP_LEAD;
 				stepTime = 0;

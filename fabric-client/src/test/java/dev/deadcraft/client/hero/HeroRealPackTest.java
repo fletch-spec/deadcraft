@@ -79,6 +79,36 @@ class HeroRealPackTest {
 		}
 	}
 
+	/**
+	 * The landing drops the hips as it bends the knees (its pelvis channel was ignored: the knees bent
+	 * under hips that stayed put, lifting the feet off the ground).
+	 */
+	@Test
+	void landingDropsTheHips() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float dt = 1 / 120f;
+		int pelvis = m.node("pelvis"), ankleL = m.node("ankle_L"), ankleR = m.node("ankle_R");
+		double standingHips = 0, standingFeet = 0, lowestHips = 9, highestFeet = -9;
+		for (int i = 0; i < 120 * 3; i++) {
+			float t = i * dt;
+			boolean air = t > 0.5f && t < 1.45f;
+			anim.update(new HeroAnimator.Input(0, 0, air ? -6 : 0, !air, 86, 112, HeroAnimator.Wall.NONE), dt);
+			float[] w = anim.lastWorld();
+			double hips = w[pelvis * 12 + 7], feet = Math.min(w[ankleL * 12 + 7], w[ankleR * 12 + 7]);
+			if (t < 0.5f) {
+				standingHips = hips;
+				standingFeet = feet;
+			}
+			if (anim.state() == HeroAnimator.State.LAND) {
+				lowestHips = Math.min(lowestHips, hips);
+				highestFeet = Math.max(highestFeet, feet);
+			}
+		}
+		assertTrue(standingHips - lowestHips > 0.12, "the hips only dropped " + (standingHips - lowestHips) + " m");
+		assertTrue(highestFeet - standingFeet < 0.12, "the feet rose " + (highestFeet - standingFeet) + " m off the ground");
+	}
+
 	/** Walk off an edge, fall a second, land standing still: the landing impact and the fades around it. */
 	@Test
 	void fallAndLandStaysOnTheBody() throws Exception {
@@ -181,6 +211,85 @@ class HeroRealPackTest {
 				assertTrue(d < 1e-3, c.name() + " frame " + f + ": hand " + d + " m from the wand's grip");
 			}
 		}
+	}
+
+	/**
+	 * The reload tosses the wand up and catches it, through the animator with the wand placed in the
+	 * hand and the upper body twisted: high over the head mid-reload, back in the hand afterwards.
+	 */
+	@Test
+	void reloadTossesTheWandAndCatchesIt() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		int wand = m.node("weapon"), hand = m.node("hand_R"), head = m.node("head");
+		double highest = -9, endGap = 9;
+		for (int i = 0; i < 120 * 3; i++) {
+			long buttons = i >= 12 && i < 24 ? HeroAnimator.RELOAD : 0;
+			anim.setLook(30);
+			anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, buttons, false), 1 / 120f);
+			float[] w = anim.lastWorld();
+			highest = Math.max(highest, w[wand * 12 + 7] - w[head * 12 + 7]);
+			endGap = Math.sqrt(sq(w[wand * 12 + 3] - w[hand * 12 + 3]) + sq(w[wand * 12 + 7] - w[hand * 12 + 7]) + sq(w[wand * 12 + 11] - w[hand * 12 + 11]));
+		}
+		assertTrue(highest > 1.5, "the wand only rose " + highest + " m above the head");
+		assertTrue(endGap < 0.3, "the wand ended " + endGap + " m from the hand");
+	}
+
+	/** Looking up raises the head and looking down lowers it, in and out of weapon stance. */
+	@Test
+	void aimFollowsThePitch() throws Exception {
+		HeroModel m = celeste();
+		for (long buttons : new long[] {0, HeroAnimator.ALT_FIRE}) {
+			double up = eyeElevation(m, -60, buttons), level = eyeElevation(m, 0, buttons), down = eyeElevation(m, 60, buttons);
+			String what = buttons == 0 ? "out of combat" : "in weapon stance";
+			assertTrue(up > level + 20, what + ": looking up only raised the eyes from " + level + " to " + up + " deg");
+			assertTrue(down < level - 20, what + ": looking down only lowered the eyes from " + level + " to " + down + " deg");
+		}
+	}
+
+	/** How high the eyes look (degrees above level, from the head) after a second standing at {@code pitch}. */
+	private static double eyeElevation(HeroModel m, float pitch, long buttons) {
+		HeroAnimator anim = new HeroAnimator(m);
+		var in = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, pitch, buttons, false);
+		for (int i = 0; i < 120; i++) anim.update(in, 1 / 120f);
+		float[] w = anim.lastWorld();
+		int head = m.node("head"), l = m.node("eye_0_L"), r = m.node("eye_0_R");
+		double x = (w[l * 12 + 3] + w[r * 12 + 3]) / 2 - w[head * 12 + 3], y = (w[l * 12 + 7] + w[r * 12 + 7]) / 2 - w[head * 12 + 7];
+		double z = (w[l * 12 + 11] + w[r * 12 + 11]) / 2 - w[head * 12 + 11];
+		return Math.toDegrees(Math.atan2(y, Math.hypot(x, z)));
+	}
+
+	/**
+	 * Combat through the animator: shooting standing, running and crouched, reloads, melee, each of
+	 * Celeste's abilities, and the orb raised, held and thrown, looking up and down throughout.
+	 */
+	@Test
+	void combatStaysOnTheBody() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float dt = 1 / 120f;
+		int pelvis = m.node("pelvis");
+		String[] events = {"ability_melee_unicorn", "ability_unicorn_radiantblast", "ability_unicorn_prismaticguard", "ability_unicorn_luminousstrike",
+			"citadel_ability_melee_parry", "ability_melee_unicorn"};
+		for (int i = 0; i < 120 * 16; i++) {
+			float t = i * dt;
+			double forward = t > 3 && t < 6 || t > 11 ? 6 : 0;
+			boolean crouched = t > 6 && t < 8;
+			long buttons = (t > 1 && t < 7 ? HeroAnimator.ATTACK : 0) | (Math.abs(t - 4) < 0.05 || Math.abs(t - 7.5) < 0.05 ? HeroAnimator.RELOAD : 0);
+			boolean channeling = t > 13 && t < 15;
+			var in = new HeroAnimator.Input(forward, 0, 0, true, crouched ? 55 : 86, crouched ? 64 : 112, HeroAnimator.Wall.NONE,
+				(float) Math.sin(t * 2) * 80, buttons, channeling);
+			if (t > 1 && t < 7 && i % 18 == 0) anim.shot();
+			int e = (int) ((t - 8.5f) / 0.7f);
+			if (t > 8.5f && e < events.length && Math.abs(t - 8.5f - e * 0.7f) < dt / 2) anim.ability(events[e], in, Double.NaN);
+			if (Math.abs(t - 12.9f) < dt / 2) anim.ability("ability_unicorn_dazzlingorb", in, Double.NaN);
+			float[] skin = anim.update(in, dt);
+			double reach = reach(m, skin, m.subtree("weaponPivot"), false);
+			assertTrue(reach < MAX_REACH, "at " + t + " s (" + anim.debugLine() + ") reaches " + reach + " m");
+			double skirt = skirtReach(m, skin, anim.lastWorld(), pelvis);
+			assertTrue(skirt < SKIRT_REACH, "at " + t + " s (" + anim.debugLine() + ") the skirt is " + skirt + " m from the hips");
+		}
+		assertTrue(anim.debugLine().contains("action NONE"), "the orb never finished: " + anim.debugLine());
 	}
 
 	/** Running, the swung ponytail ends up behind the back instead of hanging into it. */

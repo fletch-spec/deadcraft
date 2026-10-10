@@ -5,6 +5,8 @@ import dev.deadcraft.protocol.HeroFlags;
 import dev.deadcraft.protocol.HeroState;
 import dev.deadcraft.protocol.Mapping;
 import dev.deadcraft.protocol.Proto;
+import dev.deadcraft.protocol.Shot;
+import dev.deadcraft.protocol.ShotKind;
 import dev.deadcraft.protocol.Vec3;
 import java.util.Optional;
 import dev.deadcraft.client.hero.HeroAnimator;
@@ -13,6 +15,9 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.network.chat.Component;
 import org.slf4j.Logger;
@@ -58,6 +63,7 @@ public final class Follow {
 	private static boolean rawLook = true;
 	private static long lastLookTick = -1;
 	private static int lastAbilitySerial = -1;
+	private static int lastShotSerial = -1;
 	private static boolean savedBobView;
 	private static long lastGoodRead;
 
@@ -143,6 +149,7 @@ public final class Follow {
 
 		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z(), HeroRenderer.sliding(), localNow);
 		readAbilities(hero);
+		readShots(mc, hero);
 		{
 			// Hero model animation: velocity relative to where the body faces.
 			Vec3 hv = Proto.toMinecraft(hero.velocity);
@@ -150,7 +157,8 @@ public final class Follow {
 			double fx = -Math.sin(yawRad), fz = Math.cos(yawRad);  // Minecraft facing at this yaw
 			double forward = hv.x() * fx + hv.z() * fz, right = -(hv.x() * fz - hv.z() * fx);
 			HeroRenderer.setInput(new HeroAnimator.Input(forward, right, hv.y(), (hero.flags & HeroFlags.ON_GROUND) != 0,
-				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight, wallBeside(mc, player, fx, fz)));
+				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight, wallBeside(mc, player, fx, fz),
+				hero.cameraAngles.x(), hero.buttons, (hero.flags & HeroFlags.CHANNELING) != 0));
 			speedMax = Math.max(speedMax, Math.hypot(forward, right));
 		}
 		Vec3 v = Proto.toMinecraft(hero.velocity);
@@ -277,6 +285,75 @@ public final class Follow {
 		lastAbilitySerial = newest;
 	}
 
+	// ---- shots and the crosshair check -------------------------------------------------------
+
+	/** Where Minecraft's camera was and looked when the latest shot was fired (null before any). */
+	private static net.minecraft.world.phys.Vec3 fireCamera, fireLook;
+	private static float fireYawDiff, firePitchDiff;
+	private static double crosshairSum, crosshairMax;
+	private static int crosshairCount, shotsFired;
+
+	/**
+	 * New entries in the plugin's shot ring. A shot fired drives the shooting animation and remembers
+	 * Minecraft's camera ray; each impact is drawn where Deadlock's bullet hit and measured against that
+	 * ray: the angle between them, seen from the camera, is how far Deadlock's crosshair is from Minecraft's.
+	 */
+	private static void readShots(Minecraft mc, HeroState hero) {
+		int newest = hero.shotSerial;
+		if (lastShotSerial < 0 || Integer.compareUnsigned(newest, lastShotSerial) < 0 || newest - lastShotSerial > 64) {
+			lastShotSerial = newest;
+			return;
+		}
+		for (int serial = lastShotSerial + 1; Integer.compareUnsigned(serial, newest) <= 0; serial++) {
+			mapping.readShot(serial).ifPresent(shot -> {
+				if (shot.kind == ShotKind.FIRED) fired(mc, shot);
+				else if (shot.kind == ShotKind.IMPACT) impact(mc, shot);
+			});
+		}
+		lastShotSerial = newest;
+	}
+
+	private static void fired(Minecraft mc, Shot shot) {
+		HeroRenderer.shot();
+		shotsFired++;
+		var camera = mc.gameRenderer.mainCamera();
+		var f = camera.forwardVector();
+		fireCamera = camera.position();
+		fireLook = new net.minecraft.world.phys.Vec3(f.x(), f.y(), f.z());
+		// Deadlock's aim for this shot against the angles Minecraft's camera is drawn at (the raw-mouse lead).
+		fireYawDiff = (float) LookPredictor.wrap(-90f - shot.direction.y() - camera.yRot());
+		firePitchDiff = shot.direction.x() - camera.xRot();
+	}
+
+	private static void impact(Minecraft mc, Shot shot) {
+		Vec3 hit = Proto.toMinecraft(shot.origin);
+		var at = new net.minecraft.world.phys.Vec3(anchorX + (hit.x() - heroAnchor.x()), anchorY + (hit.y() - heroAnchor.y()),
+			anchorZ + (hit.z() - heroAnchor.z()));
+		for (int i = 0; i < 4; i++) mc.level.addAlwaysVisibleParticle(ParticleTypes.ELECTRIC_SPARK, at.x, at.y, at.z, 0, 0, 0);
+		if (fireCamera == null) return;
+		var to = at.subtract(fireCamera);
+		double angle = Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, to.normalize().dot(fireLook)))));
+		crosshairSum += angle;
+		crosshairMax = Math.max(crosshairMax, angle);
+		crosshairCount++;
+		if (crosshairCount <= 30) {
+			// What Minecraft's crosshair was on: its camera ray against Minecraft's blocks.
+			var end = fireCamera.add(fireLook.scale(256));
+			var target = mc.level.clip(new ClipContext(fireCamera, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+			String onTarget = target.getType() == HitResult.Type.MISS ? "nothing"
+				: String.format("%.2f blocks away", target.getLocation().distanceTo(at));
+			LOG.info("Deadcraft: crosshair check: impact {} blocks out, {} deg off Minecraft's crosshair (crosshair target {}); "
+				+ "Deadlock's shot aimed {} deg yaw, {} deg pitch from the camera's angles; damage {}",
+				String.format("%.1f", to.length()), String.format("%.2f", angle), onTarget, String.format("%.2f", fireYawDiff),
+				String.format("%.2f", firePitchDiff), shot.damage);
+		}
+	}
+
+	static String crosshairLine() {
+		return crosshairCount == 0 ? "crosshair check: no impacts yet (" + shotsFired + " shots)"
+			: String.format("crosshair check: %d impacts, %.2f deg off on average, %.2f max", crosshairCount, crosshairSum / crosshairCount, crosshairMax);
+	}
+
 	// ---- frame timing (logged every 10 s while linked) ----------------------------------------
 
 	private static double lastFrame, statsSince, frameMax, frameSum, exportMax, leadSum, leadMax, speedMax;
@@ -298,7 +375,7 @@ public final class Follow {
 			String.format("%.1f", frameMax * 1000), String.format("%.1f", exportMax * 1000),
 			mc.options.framerateLimit().get(), mc.options.enableVsync().get(), look.describe(), rawMouse.reports(),
 			String.format("%.2f", leadFrames == 0 ? 0 : leadSum / leadFrames), String.format("%.1f", leadMax));
-		LOG.info("Deadcraft: {}; top speed {} blocks/s", HeroRenderer.stats(), String.format("%.2f", speedMax));
+		LOG.info("Deadcraft: {}; top speed {} blocks/s; {}", HeroRenderer.stats(), String.format("%.2f", speedMax), crosshairLine());
 		LOG.info("Deadcraft: hud: {}", TestHud.lastLines());
 		speedMax = 0;
 		statsSince = now;

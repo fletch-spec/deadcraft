@@ -13,8 +13,17 @@ package dev.deadcraft.client.hero;
  * before their feet follow.
  */
 public final class HeroAnimator {
-	/** One frame of what the hero is doing. Speeds in blocks per second, relative to facing. */
-	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall) {}
+	/**
+	 * One frame of what the hero is doing. Speeds in blocks per second, relative to facing; {@code pitch}
+	 * where the camera looks, degrees, positive down; {@code buttons} what the player holds (Deadlock's
+	 * InputButton bits); {@code channeling} whether a signature ability is channelling.
+	 */
+	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall,
+		float pitch, long buttons, boolean channeling) {
+		public Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall) {
+			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, 0, 0, false);
+		}
+	}
 
 	/** Which side of the body a wall is on, in the air (Deadlock can bounce off it), from Minecraft's blocks. */
 	public enum Wall { NONE, FORWARD, LEFT, RIGHT }
@@ -50,6 +59,20 @@ public final class HeroAnimator {
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
+	/** Deadlock's InputButton bits for fire, alt fire (zoom) and reload. */
+	static final long ATTACK = 0x1, ALT_FIRE = 0x800, RELOAD = 0x2000;
+	/** Weapon stance lasts this long after the last shot or action (a guess: unverified against Deadlock). */
+	static final float COMBAT_HOLD_S = 3f;
+	/** Stance changes, aim strength and actions ease over these. */
+	static final float STANCE_S = 0.25f, AIM_EASE_S = 0.12f, ACTION_IN_S = 0.1f, ACTION_OUT_S = 0.2f;
+	/** The shooting pose holds this long after the last shot. */
+	static final float SHOT_HOLD_S = 0.35f;
+	/** Camera pitch, degrees, at which the aim clips' up and down poses apply fully (their head turns ~60 deg). */
+	static final float AIM_RANGE = 70f;
+
+	/** An action layered over the movement: on the upper body, or the whole body when standing still. Higher kinds interrupt lower. */
+	enum Action { NONE, SHOOT, RELOAD, MELEE, CAST, ORB }
+
 	enum State { IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, JUMP, AIR_JUMP, FALL, SLIDE, DASH, MANTLE, WALL, LAND, STOP }
 
 	private final HeroModel model;
@@ -63,6 +86,7 @@ public final class HeroAnimator {
 	private float stepWeight;
 	/** The legs, for stepping round on the spot without moving the hips. */
 	private final boolean[] legs;
+	private final int pelvis;
 	private final float[] world, skin;
 	private final int[] lookNodes;
 	private final float[] lookShares;
@@ -80,6 +104,16 @@ public final class HeroAnimator {
 	static final float HAIR_AT_RUN = 40f, HAIR_MAX = 60f, HAIR_MIN = -10f, HAIR_EASE_S = 0.18f;
 	private float hairSwing;
 	private State state = State.IDLE;
+	/** The movement's pose with the action and aim on top: what is skinned (see {@link #update}). */
+	private final HeroModel.Pose top, actionPose, actionPrevious, actionMix;
+	private final boolean[] upper, lower, aimed;
+	private Action action = Action.NONE;
+	private String actionClip = "";
+	/** Time in the action, its strength, how much of the legs it takes, and its crossfade from the action before. */
+	private float actionTime, actionWeight, actionLegs, actionFade = 1;
+	private float combatTime = COMBAT_HOLD_S, stance, aimWeight, orbWeight, sinceShot = 99, pitch;
+	private int meleeCount;
+	private boolean reloadHeld, actionDone;
 	/** A move started by an ability event or the motion, held until it ends. */
 	private State move;
 	private float stateTime, fade = 1, airTime, fadeTime = FADE_S;
@@ -99,7 +133,18 @@ public final class HeroAnimator {
 		previous = model.newPose();
 		shown = model.newPose();
 		steps = model.newPose();
+		top = model.newPose();
+		actionPose = model.newPose();
+		actionPrevious = model.newPose();
+		actionMix = model.newPose();
+		// The weapon (hanging off the root) goes with the upper body: the reload tosses it.
+		upper = model.subtree("spine_0", "weaponPivot");
+		lower = new boolean[upper.length];
+		for (int n = 0; n < upper.length; n++) lower[n] = !upper[n];
+		// Aim clips also turn the weapon, but not weaponPivot: theirs is in the clips' other root frame.
+		aimed = model.subtree("spine_0", "weapon");
 		legs = model.subtree("leg_upper_L", "leg_upper_R");
+		pelvis = model.node("pelvis");
 		layered = model.subtree("spine_0", "leg_upper_L", "leg_upper_R");
 		world = new float[model.nodeCount() * 12];
 		skin = new float[model.skinnedJointCount() * 12];
@@ -148,6 +193,17 @@ public final class HeroAnimator {
 		return state == State.SLIDE;
 	}
 
+	/** In weapon stance (shooting lately) or holding the orb: the body faces the camera more readily. */
+	public boolean inCombat() {
+		return combatTime < COMBAT_HOLD_S || action == Action.ORB;
+	}
+
+	/** The server fired one of the hero's shots. */
+	public void shot() {
+		sinceShot = 0;
+		combatTime = 0;
+	}
+
 	/** How fast the drawn body is turning, degrees per second (positive: to its right). */
 	public void setTurnRate(float degreesPerSecond) {
 		turnRate = degreesPerSecond;
@@ -174,7 +230,42 @@ public final class HeroAnimator {
 			start(State.MANTLE);
 		} else if (n.contains("jump")) {
 			start(in.grounded() || airTime < 0.25f ? State.JUMP : State.AIR_JUMP);
+		} else if (n.contains("parry")) {
+			startAction(Action.MELEE, in.grounded() ? "parry" : "parry_inair");
+		} else if (n.contains("melee")) {
+			meleeCount++;
+			startAction(Action.MELEE, (in.grounded() ? "melee_quick_" : "melee_quick_in_air_") + (meleeCount % 2 == 0 ? 2 : 1));
+		} else if (n.contains("dazzlingorb")) {
+			startOrb();
+		} else if (n.startsWith("ability_")) {
+			// Celeste's signature abilities (Deadlock's scripts/heroes.vdata); any other hero's get a generic cast.
+			String clip = n.contains("radiantblast") ? "ability_unicorn_radiant_blast"
+				: n.contains("prismaticguard") ? "ability_unicorn_prismaticguard"
+				: n.contains("luminousstrike") ? "throw" : "cast_start";
+			startAction(Action.CAST, clip);
 		}
+	}
+
+	private void startAction(Action kind, String clip) {
+		// Higher kinds interrupt lower; nothing interrupts the orb but its own end.
+		if (action == Action.ORB && kind != Action.ORB && !actionDone) return;
+		if (kind.ordinal() < action.ordinal() && !actionDone) return;
+		if (actionWeight > 0) {
+			actionPrevious.copyFrom(actionMix);
+			actionFade = 0;
+		}
+		HeroRenderer.LOG.info("Deadcraft: action {} -> {} {}", action, kind, clip);
+		action = kind;
+		actionClip = clip;
+		actionTime = 0;
+		actionDone = false;
+		combatTime = 0;
+	}
+
+	/** Celeste's ultimate: raising the orb, holding it while the ability channels, then throwing it. */
+	private void startOrb() {
+		if (action == Action.ORB && !actionDone) return;
+		startAction(Action.ORB, "ability_unicorn_dazzlingorb_start");
 	}
 
 	private void start(State s) {
@@ -240,6 +331,12 @@ public final class HeroAnimator {
 		pose.finish();
 		shown.copyFrom(previous);
 		shown.blendTowards(pose, fade < 1 ? smooth(fade) : 1);
+
+		// Over the movement: the action (shooting, an ability...), then the aim from the camera's pitch.
+		top.copyFrom(shown);
+		updateAction(in, crouched, dt);
+		applyAction();
+		applyAim(in, dt);
 		// Model space turns the other way round from Minecraft's yaw (the renderer turns by -yaw).
 		rig.twist = (float) -Math.toRadians(look);
 		rig.followerTwist = rig.twist * armShare;
@@ -248,7 +345,7 @@ public final class HeroAnimator {
 			+ (in.grounded() ? 0 : Math.max(0, Math.min(25, -in.up() * 4)))));
 		hairSwing += (hairTarget - hairSwing) * (1 - (float) Math.exp(-dt / HAIR_EASE_S));
 		rig.swing = (float) Math.toRadians(hairSwing);
-		model.skin(shown, world, rig, skin);
+		model.skin(top, world, rig, skin);
 		return skin;
 	}
 
@@ -290,18 +387,18 @@ public final class HeroAnimator {
 
 	private void sample(Input in) {
 		switch (state) {
-			case IDLE -> idle("out_of_combat_stand_idle", "out_of_combat_run_");
-			case CROUCH_IDLE -> idle("out_of_combat_crouch_idle", "out_of_combat_crouch_run_");
-			case RUN -> directional("out_of_combat_run_", in);
-			case CROUCH_RUN -> directional("out_of_combat_crouch_run_", in);
+			case IDLE -> idle(false);
+			case CROUCH_IDLE -> idle(true);
+			case RUN -> directional(false, in);
+			case CROUCH_RUN -> directional(true, in);
 			case JUMP -> play("jump_ground", stateTime);
 			case AIR_JUMP -> play("jump_air", stateTime);
 			case FALL -> play("in_air_loop_down", stateTime);
 			case MANTLE -> play(mantleClip, stateTime * MANTLE_RATE);
 			case WALL -> play("wall_attach_" + wallSide.name().toLowerCase(), stateTime * 0.7f);
 			case DASH -> play(dashClip, stateTime);
-			case LAND -> layer("out_of_combat_stand_idle", "landing_impact_idle");
-			case STOP -> layer("out_of_combat_stand_idle", "run_to_stop_stand");
+			case LAND -> layer("landing_impact_idle");
+			case STOP -> layer("run_to_stop_stand");
 			case SLIDE -> {
 				float start = clipDuration("slide_start");
 				if (stateTime < start) play("slide_start", stateTime);
@@ -310,14 +407,30 @@ public final class HeroAnimator {
 		}
 	}
 
-	/** A base clip with an additive clip layered on it (fading out over its last tenth of a second). */
-	private void layer(String baseClip, String layerClip) {
-		HeroModel.Clip base = model.clips.get(baseClip), top = model.clips.get(layerClip);
-		if (base != null) pose.add(base, stateTime, 1);
+	/** The standing idle with an additive clip layered on it (fading out over its last tenth of a second). */
+	private void layer(String layerClip) {
+		stanceMix("out_of_combat_stand_idle", "weapon_stand_idle", stateTime, 1);
 		pose.finish();
-		if (top == null || !top.additive()) return;
-		float left = top.duration() - stateTime;
-		pose.addLayer(top, stateTime, Math.max(0, Math.min(1, left / 0.1f)), layered);
+		HeroModel.Clip layer = model.clips.get(layerClip);
+		if (layer == null || !layer.additive()) return;
+		float left = layer.duration() - stateTime, weight = Math.max(0, Math.min(1, left / 0.1f));
+		pose.addLayer(layer, stateTime, weight, layered);
+		// The hips' drop: the layer's pelvis channel is in the export's Z-up root frame (not layered above),
+		// where its height is the z translation; the change from the clip's first frame is the drop.
+		if (pelvis < 0) return;
+		float drop = model.translation(layer, pelvis, 2, stateTime) - model.translation(layer, pelvis, 2, 0);
+		pose.translate(pelvis, 0, drop * weight, 0);
+	}
+
+	/** {@code weight} of the out-of-combat clip and the weapon-stance one, mixed by the stance. */
+	private void stanceMix(String outOfCombat, String weapon, float time, float weight) {
+		HeroModel.Clip a = model.clips.get(outOfCombat), b = model.clips.get(weapon);
+		if (b == null) {
+			if (a != null) pose.add(a, time, weight);
+			return;
+		}
+		if (a != null) pose.add(a, time, weight * (1 - stance));
+		pose.add(b, time, weight * stance);
 	}
 
 	/**
@@ -325,10 +438,10 @@ public final class HeroAnimator {
 	 * standing turn clips; the strafe run at a slow phase reads as stepping round). The steps go into
 	 * the legs only: blended into the whole body they lowered the hips, a visible dip.
 	 */
-	private void idle(String idleClip, String runPrefix) {
-		HeroModel.Clip c = model.clips.get(idleClip);
-		if (c != null) pose.add(c, stateTime, 1);
+	private void idle(boolean crouch) {
+		stanceMix(crouch ? "out_of_combat_crouch_idle" : "out_of_combat_stand_idle", crouch ? "weapon_crouch_idle" : "weapon_stand_idle", stateTime, 1);
 		float w = stepWeight * STEP_WEIGHT;
+		String runPrefix = (stance > 0.5f ? "weapon_" : "out_of_combat_") + (crouch ? "crouch_run_" : "run_");
 		HeroModel.Clip step = model.clips.get(runPrefix + (turnRate > 0 ? "e" : "w"));
 		if (w <= 0 || step == null) return;
 		pose.finish();
@@ -338,8 +451,14 @@ public final class HeroAnimator {
 		pose.blendTowards(steps, w, legs);
 	}
 
-	/** The two run clips around the movement direction, blended by angle, at the shared phase. */
-	private void directional(String prefix, Input in) {
+	/** The two run clips around the movement direction, blended by angle, at the shared phase, in both stances. */
+	private void directional(boolean crouch, Input in) {
+		String run = crouch ? "crouch_run_" : "run_";
+		if (stance < 1) directional("out_of_combat_" + run, in, 1 - stance);
+		if (stance > 0) directional("weapon_" + run, in, stance);
+	}
+
+	private void directional(String prefix, Input in, float weight) {
 		double angle = Math.toDegrees(Math.atan2(in.right(), in.forward()));  // 0 forward, 90 right
 		double sector = ((angle % 360) + 360) % 360 / 45.0;
 		int i0 = (int) Math.floor(sector) % 8, i1 = (i0 + 1) % 8;
@@ -347,8 +466,128 @@ public final class HeroAnimator {
 		clipA = prefix + DIRS[i0];
 		clipB = prefix + DIRS[i1];
 		blend = w1;
-		playPhase(clipA, runPhase, 1 - w1);
-		playPhase(clipB, runPhase, w1);
+		playPhase(clipA, runPhase, (1 - w1) * weight);
+		playPhase(clipB, runPhase, w1 * weight);
+	}
+
+	/** Starts, advances and ends the action from the buttons, shots and channel; eases the stance. */
+	private void updateAction(Input in, boolean crouched, float dt) {
+		long b = in.buttons();
+		boolean attack = (b & ATTACK) != 0, reload = (b & RELOAD) != 0;
+		boolean reloadPressed = reload && !reloadHeld;
+		reloadHeld = reload;
+		sinceShot += dt;
+		boolean shooting = attack || sinceShot < SHOT_HOLD_S;
+		if (shooting || (b & ALT_FIRE) != 0 || action != Action.NONE && !actionDone) combatTime = 0;
+		else combatTime += dt;
+		stance = approach(stance, combatTime < COMBAT_HOLD_S ? 1 : 0, dt / STANCE_S);
+
+		if (in.channeling()) startOrb();
+		if (reloadPressed) {
+			String clip = !in.grounded() ? "reload_in_air_quick" : state == State.SLIDE ? "reload_slide_quick"
+				: crouched ? "reload_crouch_idle" : speed > MOVE_START ? "reload_run" : "reload_idle";
+			startAction(Action.RELOAD, clip);
+		}
+		if (shooting && (action == Action.NONE || actionDone)) startAction(Action.SHOOT, "shoot_idle_start");
+		if (action == Action.NONE) return;
+
+		actionTime += dt;
+		actionFade = Math.min(1, actionFade + dt / ACTION_IN_S);
+		float left = Float.MAX_VALUE;
+		switch (action) {
+			case SHOOT -> {
+				// The start once, then the loop while the shots keep coming.
+				String set = crouched ? "shoot_crouch_" : "shoot_idle_";
+				actionClip = actionTime < clipDuration(set + "start") ? set + "start" : set + "loop";
+				if (!shooting) actionDone = true;
+				else if (actionDone) actionDone = false;
+			}
+			case ORB -> {
+				if (!actionDone && !in.channeling() && actionTime > 0.2f) {
+					// Thrown: the release, crossfaded from wherever the raise or the hold had got to.
+					actionPrevious.copyFrom(actionMix);
+					actionFade = 0;
+					actionClip = in.grounded() ? "ability_unicorn_dazzlingorb_end" : "ability_unicorn_dazzlingorb_inair_end";
+					actionTime = 0;
+					actionDone = true;
+				} else if (!actionDone && actionTime >= clipDuration("ability_unicorn_dazzlingorb_start")) {
+					actionClip = "ability_unicorn_dazzlingorb_loop";
+				}
+				if (actionDone) left = clipDuration(actionClip) - actionTime;
+			}
+			default -> {
+				left = clipDuration(actionClip) - actionTime;
+				if (left <= 0) actionDone = true;
+			}
+		}
+		float target = action == Action.SHOOT && actionDone ? 0 : Math.max(0, Math.min(1, left / ACTION_OUT_S));
+		actionWeight = approach(actionWeight, target, dt / (target > actionWeight ? ACTION_IN_S : ACTION_OUT_S));
+		if (actionDone && actionWeight <= 0) {
+			HeroRenderer.LOG.info("Deadcraft: action {} ended", action);
+			action = Action.NONE;
+		}
+		// The legs too only standing still (crouched only for the clips with crouched versions).
+		boolean legs = in.grounded() && (state == State.IDLE || state == State.LAND || state == State.STOP
+			|| state == State.CROUCH_IDLE && (action == Action.SHOOT || action == Action.RELOAD));
+		actionLegs = approach(actionLegs, legs ? 1 : 0, dt / 0.15f);
+		orbWeight = approach(orbWeight, action == Action.ORB && !actionDone ? 1 : 0, dt / AIM_EASE_S);
+	}
+
+	/** Blends the action's clip into {@link #top}: the upper body by its strength, the legs by actionLegs too. */
+	private void applyAction() {
+		if (action == Action.NONE || actionWeight <= 0) return;
+		HeroModel.Clip c = model.clips.get(actionClip);
+		if (c == null) return;
+		float time = actionTime;
+		if (action == Action.SHOOT && actionClip.endsWith("loop")) time -= clipDuration(actionClip.replace("loop", "start"));
+		actionPose.clear();
+		actionPose.add(c, time, 1);
+		actionPose.finish();
+		actionMix.copyFrom(actionPose);
+		if (actionFade < 1) {
+			actionMix.copyFrom(actionPrevious);
+			actionMix.blendTowards(actionPose, smooth(actionFade));
+		}
+		float w = smooth(actionWeight);
+		top.blendTowards(actionMix, w, upper);
+		if (actionLegs > 0) top.blendTowards(actionMix, w * actionLegs, lower);
+	}
+
+	/**
+	 * The aim: the change from each aim set's centre pose to its up or down pose, by the camera's pitch,
+	 * for the stance and posture (and Celeste's orb while she holds it).
+	 */
+	private void applyAim(Input in, float dt) {
+		pitch = in.pitch();
+		boolean moving = switch (state) {
+			case IDLE, RUN, CROUCH_IDLE, CROUCH_RUN, LAND, STOP, SLIDE, FALL, JUMP, AIR_JUMP -> true;
+			default -> false;
+		};
+		aimWeight = approach(aimWeight, moving || orbWeight > 0 ? 1 : 0, dt / AIM_EASE_S);
+		float p = Math.max(-1, Math.min(1, pitch / AIM_RANGE));
+		float amount = Math.abs(p) * aimWeight;
+		if (amount <= 0) return;
+		String dir = p < 0 ? "_up" : "_down";
+		String weaponSet = switch (state) {
+			case CROUCH_IDLE, CROUCH_RUN -> "aim_weapon_crouch";
+			case SLIDE -> "aim_weapon_slide";
+			case RUN, FALL, JUMP, AIR_JUMP -> "aim_weapon_run";
+			default -> "aim_weapon_idle";
+		};
+		float rest = 1 - orbWeight;
+		// Out of combat only the head and shoulders follow (there is no such set for a slide).
+		if (state != State.SLIDE) aimLayer("aim_out_of_combat_idle", dir, amount * rest * (1 - stance));
+		aimLayer(weaponSet, dir, amount * rest * stance);
+		aimLayer("aim_dazzling_orb", dir, amount * orbWeight);
+	}
+
+	private void aimLayer(String set, String dir, float weight) {
+		HeroModel.Clip centre = model.clips.get(set), to = model.clips.get(set + dir);
+		if (weight > 0 && centre != null && to != null) top.addLayer(to, centre, clock, weight, aimed);
+	}
+
+	private static float approach(float value, float target, float step) {
+		return value < target ? Math.min(target, value + step) : Math.max(target, value - step);
 	}
 
 	private static String airDirection(Input in) {
@@ -381,14 +620,17 @@ public final class HeroAnimator {
 	/** Everything about the current blend, for the spike report. */
 	String debugLine() {
 		return String.format("state %s for %.2f s (fade %.2f of %.2f s), move %s, clips %s/%s %.2f, dash %s, mantle %s, wall %s, look %.0f, turn %.0f, "
-			+ "speed %.1f, %s, eye %.0f, hull %.0f, air %.2f s", state, stateTime, fade, fadeTime, move, clipA, clipB, blend, dashClip, mantleClip,
-			wallSide, look, turnRate, speed, grounded ? "ground" : "air", eye, hull, airTime);
+			+ "speed %.1f, %s, eye %.0f, hull %.0f, air %.2f s, action %s %s %.2f s (weight %.2f, legs %.2f%s), stance %.2f, pitch %.0f, aim %.2f",
+			state, stateTime, fade, fadeTime, move, clipA, clipB, blend, dashClip, mantleClip, wallSide, look, turnRate, speed,
+			grounded ? "ground" : "air", eye, hull, airTime, action, actionClip, actionTime, actionWeight, actionLegs, actionDone ? ", ending" : "",
+			stance, pitch, aimWeight);
 	}
 
 	/** For the test HUD. */
 	public String hudLine() {
-		return String.format("anim: %s%s  speed %.1f b/s  %s  eye %.0f/%.0f  hull %.0f/%.0f  look %.0f", state,
-			state == State.DASH ? " " + dashClip : "", speed, grounded ? "ground" : "air", eye, standingEye, hull, standingHull, look);
+		return String.format("anim: %s%s  speed %.1f b/s  %s  eye %.0f/%.0f  hull %.0f/%.0f  look %.0f  pitch %.0f  stance %.1f%s", state,
+			state == State.DASH ? " " + dashClip : "", speed, grounded ? "ground" : "air", eye, standingEye, hull, standingHull, look, pitch, stance,
+			action == Action.NONE ? "" : "  " + action + " " + actionClip);
 	}
 
 	public String describe() {
