@@ -487,7 +487,7 @@ class HeroRealPackTest {
 		assertTrue(worst < 0.03, "the left foot moved " + worst + " m from the idle's during a standing reload");
 	}
 
-	/** The heavy hit ends after the strike (its tail is two settling steps Deadlock doesn't show). */
+	/** The heavy hit ends with its clip and gives way to standing. */
 	@Test
 	void heavyHitEndsAfterTheStrike() throws Exception {
 		HeroModel m = celeste();
@@ -496,8 +496,8 @@ class HeroRealPackTest {
 		var idle = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
 		for (int i = 0; i < 60; i++) anim.update(held, 1 / 120f);
 		anim.ability("ability_melee_unicorn", held, Double.NaN);
-		for (int i = 0; i < 60; i++) anim.update(idle, 1 / 120f);
-		assertTrue(anim.debugLine().contains("action NONE"), "half a second after the hit: " + anim.debugLine());
+		for (int i = 0; i < 72; i++) anim.update(idle, 1 / 120f);
+		assertTrue(anim.debugLine().contains("action NONE"), "0.6 s after the hit (its tail at double speed): " + anim.debugLine());
 	}
 
 	/**

@@ -14,7 +14,7 @@ namespace Deadcraft.HeroExport;
 /// such as the upper body turning to the camera), and one downscaled texture per material beside it.
 ///
 /// <code>
-/// "DCHM" int32 version=3
+/// "DCHM" int32 version=4
 /// int32 materials; per material: string name, string texture file (beside the pack, or "")
 /// int32 vertices; per vertex: float3 position (metres, glTF axes), float3 normal, float2 uv,
 ///                 uint32 colour (RGBA8), uint16x4 joints (skinned joint index), float4 weights
@@ -24,13 +24,15 @@ namespace Deadcraft.HeroExport;
 /// int32 skinned joints; per joint: int32 node, float12 inverse bind (3x4 rows: x' = row0 . (x, y, z, 1), ...)
 /// int32 clips; per clip: string name, float fps, int32 frames, byte flags (1 loops, 2 additive),
 ///                 frames x nodes x float10 (each node's local transform, as the rest pose; for an
-///                 additive clip, the change from the bind pose, to layer on another pose)
+///                 additive clip, the change from the bind pose, to layer on another pose),
+///                 then frames x float3: the clip's travel (root_motion's translation from rest, in its
+///                 parent's frame), taken off the poses; zero for additive clips)
 /// </code>
 /// Strings are int32 byte length + UTF-8. Little-endian throughout.
 /// </summary>
 internal static class HeroPack
 {
-	public const int Version = 3;
+	public const int Version = 4;
 	private const float Fps = 30f;
 	private const int TextureMax = 1024;
 
@@ -212,7 +214,7 @@ internal static class HeroPack
 
 		// ---- animations: each node's local translation, rotation and scale, sampled at Fps ----
 		var tracks = armature.AnimationTracks;
-		var clipData = new List<(string Name, bool Loop, bool Additive, int Frames, float[] Locals)>();
+		var clipData = new List<(string Name, bool Loop, bool Additive, int Frames, float[] Locals, float[] Travel)>();
 		double worstCheck = 0;
 		string worstAt = "";
 		foreach (var (clipName, loop) in Clips)
@@ -231,6 +233,7 @@ internal static class HeroPack
 			// bind pose; they are stored raw, without the full-pose fixes below.
 			bool additive = model.LogicalAnimations.FirstOrDefault(a => a.Name == tracks[track].Name)?.Extras?["additive"]?.GetValue<bool>() == true;
 			var locals = new float[frames * nodes.Count * 10];
+			var travels = new float[frames * 3];
 			var frameLocals = new Trs[frames][];
 			for (int f = 0; f < frames; f++)
 			{
@@ -243,6 +246,9 @@ internal static class HeroPack
 					// The same travel is baked into the joints beside root_motion (196 cloth bones for Celeste,
 					// simulated in the clip's space): take it off them too, or the skirt is left metres behind.
 					var travel = local[rootMotion].T - rest[rootMotion].T;
+					travels[f * 3] = travel.X;
+					travels[f * 3 + 1] = travel.Y;
+					travels[f * 3 + 2] = travel.Z;
 					for (int n = 0; n < nodes.Count; n++)
 						if (n != rootMotion && parents[n] == parents[rootMotion]) local[n].T -= travel;
 					local[rootMotion].T = rest[rootMotion].T;
@@ -270,7 +276,7 @@ internal static class HeroPack
 				for (int n = 0; n < nodes.Count; n++) Put(locals, (f * nodes.Count + n) * 10, frameLocals[f][n]);
 				if (clipName == "dash_ground" && f == 15) WriteReference(frameLocals[f]);
 			}
-			clipData.Add((clipName, loop, additive, frames, locals));
+			clipData.Add((clipName, loop, additive, frames, locals, travels));
 		}
 		Console.WriteLine($"pack: {clipData.Count} clips, {clipData.Sum(c => c.Frames)} frames; rebuilt skinning differs from the exporter's by at most {worstCheck:E1} ({worstAt})");
 		if (worstCheck > 1e-3) throw new InvalidOperationException("skeleton rebuild doesn't match the exporter's skinning; refusing to write a broken pack");
@@ -318,13 +324,14 @@ internal static class HeroPack
 			foreach (float f in new[] { ib.M11, ib.M21, ib.M31, ib.M41, ib.M12, ib.M22, ib.M32, ib.M42, ib.M13, ib.M23, ib.M33, ib.M43 }) w.Write(f);
 		}
 		w.Write(clipData.Count);
-		foreach (var (name, loop, additive, frames, locals) in clipData)
+		foreach (var (name, loop, additive, frames, locals, travels) in clipData)
 		{
 			Str(name);
 			w.Write(Fps);
 			w.Write(frames);
 			w.Write((byte)((loop ? 1 : 0) | (additive ? 2 : 0)));
 			foreach (float f in locals) w.Write(f);
+			foreach (float f in travels) w.Write(f);
 		}
 		Console.WriteLine($"pack: wrote {outPath} ({w.BaseStream.Length / 1024} KiB)");
 

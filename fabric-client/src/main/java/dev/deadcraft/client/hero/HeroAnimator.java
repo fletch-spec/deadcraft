@@ -92,8 +92,8 @@ public final class HeroAnimator {
 	static final float RECOIL_FADE_S = 0.05f;
 	/** A heavy wind-up held this long with no hit gives up. */
 	static final float HEAVY_MAX_WAIT_S = 1.2f;
-	/** The heavy hit plays this far (the strike), fading out over its last ACTION_OUT_S. */
-	static final float HEAVY_HIT_S = 0.4f;
+	/** The heavy hit plays all of it (its tail settles the feet); after the strike, at double speed. */
+	static final float HEAVY_HIT_S = 9f, HEAVY_STRIKE_S = 0.3f;
 	/** Weapon stance lasts this long after the last shot or action (a guess: unverified against Deadlock). */
 	static final float COMBAT_HOLD_S = 3f;
 	/** Stance changes, aim strength and actions ease over these. */
@@ -686,7 +686,10 @@ public final class HeroAnimator {
 		actionTime += dt;
 		actionTravel += speed * dt;
 		actionTopSpeed = (float) Math.max(actionTopSpeed, speed);
-		clipTime += dt * (action == Action.SHOOT ? SHOOT_RATE : actionRate);
+		// The heavy hit's tail (two small settling steps after the strike) at double speed: played as it is it
+		// read as four steps; cut short, the feet slid back to the idle's stance.
+		boolean settling = action == Action.MELEE && actionClip.endsWith("hit") && clipTime > HEAVY_STRIKE_S;
+		clipTime += dt * (action == Action.SHOOT ? SHOOT_RATE : settling ? 2 : actionRate);
 		if (action == Action.RELOAD && reloadSignalSeen && in.reload() >= 0) clipTime = in.reload() * clipDuration(actionClip);
 		actionFade = Math.min(1, actionFade + dt / actionFadeS);
 		float left = Float.MAX_VALUE;

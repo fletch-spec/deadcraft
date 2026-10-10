@@ -51,6 +51,7 @@ class HeroModelTest {
 			for (float x : IDENTITY_TRS) b.putFloat(x);
 			trs(b, f, 1, 0, 0, 0, 0, 1);
 		}
+		for (int f = 0; f < 2 * 3; f++) b.putFloat(0);  // travel
 		// "swing": 170 then 190 degrees about y. Stored as glTF would (w >= 0 each), the two frames sit on
 		// opposite sides of the quaternion sphere, though they are only 20 degrees apart.
 		str(b, "swing");
@@ -65,11 +66,13 @@ class HeroModelTest {
 			}
 			trs(b, 0, 1, 0, 0, qy, 0, qw);
 		}
+		for (int f = 0; f < 2 * 3; f++) b.putFloat(0);
 		str(b, "turn");
 		float s = (float) Math.sqrt(0.5);
 		b.putFloat(2f).putInt(1).put((byte) 1);
 		for (float x : IDENTITY_TRS) b.putFloat(x);
 		trs(b, 0, 1, 0, 0, s, 0, s);
+		for (int f = 0; f < 3; f++) b.putFloat(0);
 		return b.flip();
 	}
 

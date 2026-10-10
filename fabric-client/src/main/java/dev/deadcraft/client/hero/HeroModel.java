@@ -21,13 +21,18 @@ import java.util.Map;
  * skeleton and the skinning matrices, with an optional turn of the upper body (to the camera).
  */
 public final class HeroModel {
-	public static final int VERSION = 3;
+	public static final int VERSION = 4;
 	static final int TRS = 10;
 
 	public record Material(String name, String texture, int[] indices) {}
 
-	/** {@code additive}: the frames are changes from the bind pose, to layer with {@link Pose#addLayer}. */
-	public record Clip(String name, float fps, int frames, boolean loop, boolean additive, float[] locals) {
+	/**
+	 * {@code additive}: the frames are changes from the bind pose, to layer with {@link Pose#addLayer}.
+	 * {@code travel}: 3 per frame, the clip's own travel (root_motion's translation, in its parent's frame),
+	 * taken off the poses because Deadlock moves the hero. (Played back in a heavy melee, it leapt the
+	 * whole body, feet and all: kept for foot placement later.)
+	 */
+	public record Clip(String name, float fps, int frames, boolean loop, boolean additive, float[] locals, float[] travel) {
 		public float duration() {
 			return loop ? frames / fps : (frames - 1) / fps;
 		}
@@ -156,7 +161,10 @@ public final class HeroModel {
 			float[] locals = new float[frames * nodes * TRS];
 			b.asFloatBuffer().get(locals);
 			b.position(b.position() + locals.length * 4);
-			clips.put(name, new Clip(name, fps, frames, loop, additive, locals));
+			float[] travel = new float[frames * 3];
+			b.asFloatBuffer().get(travel);
+			b.position(b.position() + travel.length * 4);
+			clips.put(name, new Clip(name, fps, frames, loop, additive, locals, travel));
 		}
 		return new HeroModel(directory, materials, p, n, uv, c, j, w, nodeNames, parents, rest, skinNodes, inverseBinds, clips);
 	}
