@@ -63,7 +63,9 @@ public final class HeroAnimator {
 	 * Run/idle switching with a margin, so speeds near the line don't flicker between the two. Standing,
 	 * Deadlock's hero drifts at up to about 0.7 blocks/s now and then (seen in game): not a run.
 	 */
-	static final double MOVE_START = 1.0, MOVE_STOP = 0.3;
+	static final double MOVE_START = 1.0, MOVE_STOP = 0.5;
+	/** Crouched, a crawl (spamming crouch: ~0.4 blocks/s) is still moving. */
+	static final double CROUCH_MOVE_START = 0.3, CROUCH_MOVE_STOP = 0.15;
 	/** Body turn speed (degrees/s) at which standing feet fully step. */
 	static final float TURN_STEP_RATE = 240f;
 	/** Step cycles per second at full turning speed (1.5 looked like scurrying). */
@@ -183,6 +185,8 @@ public final class HeroAnimator {
 	private float actionFadeS = ACTION_IN_S;
 	/** The spine's joints (layered over movement as a change) and the arms and wand (played as they are). */
 	private final boolean[] spineChain, limbs, aimHead;
+	private final int chest;
+	private final float[] chestNow = new float[12], chestClip = new float[12];
 	private float combatTime = COMBAT_HOLD_S, stance, aimWeight, orbWeight, sinceShot = 99, pitch;
 	private int meleeCount;
 	private boolean actionDone;
@@ -219,6 +223,7 @@ public final class HeroAnimator {
 		spineChain = new boolean[upper.length];
 		for (String n : new String[] {"spine_0", "spine_1", "spine_2", "spine_3", "neck_0", "head"}) if (model.node(n) >= 0) spineChain[model.node(n)] = true;
 		limbs = model.subtree("clavicle_L", "clavicle_R", "weaponPivot");
+		chest = model.node("spine_3");
 		aimHead = new boolean[upper.length];
 		for (String n : new String[] {"neck_0", "head"}) if (model.node(n) >= 0) aimHead[model.node(n)] = true;
 		legs = model.subtree("leg_upper_L", "leg_upper_R");
@@ -448,7 +453,9 @@ public final class HeroAnimator {
 		if (state == State.RUN || state == State.CROUCH_RUN) {
 			// Following the speed down to a crawl (spamming crouch slows the hero to ~0.4 blocks/s; at half
 			// rate the legs looked far too fast).
-			float rate = (float) Math.max(0.1, Math.min(2.0, speed / (state == State.RUN ? runSpeed : runSpeed * 0.5)));
+			// Down to a crawl when crouched (spamming crouch slows the hero to ~0.4 blocks/s); standing, no slower
+			// than half rate (the last moments of a stop played in slow motion).
+			float rate = (float) Math.max(state == State.RUN ? 0.5 : 0.1, Math.min(2.0, speed / (state == State.RUN ? runSpeed : runSpeed * 0.5)));
 			// Under a melee's spinning hips, double-speed legs flailed: at most normal pace.
 			if (action == Action.MELEE && clipLegs < 1) rate = Math.min(rate, 1f);
 			HeroModel.Clip c = model.clips.get(state == State.RUN ? "out_of_combat_run_n" : "out_of_combat_crouch_run_n");
@@ -508,7 +515,7 @@ public final class HeroAnimator {
 		// Climbing a step barely moves sideways: going up counts as moving too.
 		double motion = Math.max(speed, Math.abs(in.up()));
 		boolean wasMoving = state == State.RUN || state == State.CROUCH_RUN;
-		boolean moving = wasMoving ? motion > MOVE_STOP || stateTime < 0.15f : motion > MOVE_START;
+		boolean moving = wasMoving ? motion > (crouched ? CROUCH_MOVE_STOP : MOVE_STOP) || stateTime < 0.15f : motion > (crouched ? CROUCH_MOVE_START : MOVE_START);
 		if (!wasMoving && (state == State.IDLE || state == State.CROUCH_IDLE) && stateTime < 0.1f) moving = false;
 		if (crouched) return moving ? State.CROUCH_RUN : State.CROUCH_IDLE;
 		return moving ? State.RUN : State.IDLE;
@@ -749,6 +756,7 @@ public final class HeroAnimator {
 	 * from a reload toss to the wrong place over a jump, and a moving quick melee looked wrong).
 	 */
 	private void applyAction() {
+		rig.followerDeltaWeight = 0;
 		if (action == Action.NONE || actionWeight <= 0) return;
 		HeroModel.Clip c = model.clips.get(actionClip), ref = model.clips.get(referenceClip);
 		if (c == null) return;
@@ -769,6 +777,15 @@ public final class HeroAnimator {
 			actionReference.finish();
 			top.addDifference(actionMix, actionReference, w * (1 - actionLegs), spineChain);
 			top.blendTowards(actionMix, w * (1 - actionLegs), limbs);
+			// The arms now hang off a torso turned from the clip's (by the run underneath); the wand hangs off
+			// the root and kept the clip's angle, outside the hand. Turn it with the torso too.
+			if (chest >= 0) {
+				model.chainWorld(top, top, null, chest, chestNow);
+				// (The clip's wand goes with the clip's whole body, hips included: its chest entirely from the clip.)
+				model.chainWorld(actionMix, actionMix, null, chest, chestClip);
+				HeroModel.relative(chestNow, chestClip, rig.followerDelta);
+				rig.followerDeltaWeight = w * (1 - actionLegs);
+			}
 		}
 		if (actionLegs > 0) {
 			// A melee on the move (the heavy one lunges): the legs keep running, so she steps instead of

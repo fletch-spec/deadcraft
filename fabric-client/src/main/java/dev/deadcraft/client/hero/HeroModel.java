@@ -425,6 +425,13 @@ public final class HeroModel {
 		 */
 		public int follower = -1, grip = -1, leader = -1;
 		public float followerTwist;
+		/**
+		 * A model-space transform (3x4) to move the follower by first, {@code followerDeltaWeight} of it: the
+		 * turn the torso took under an action's arms (the arms follow the torso; the wand, hanging off the
+		 * root, doesn't by itself).
+		 */
+		public final float[] followerDelta = new float[12];
+		public float followerDeltaWeight;
 	}
 
 	/**
@@ -470,6 +477,16 @@ public final class HeroModel {
 			boolean[] below = new boolean[nodeCount()];
 			below[rig.follower] = true;
 			for (int n = rig.follower + 1; n < below.length; n++) below[n] = parents[n] >= 0 && below[parents[n]];
+			if (rig.followerDeltaWeight > 0) {
+				float k = rig.followerDeltaWeight;
+				float[] moved = new float[12];
+				for (int n = 0; n < below.length; n++) {
+					if (!below[n]) continue;
+					mul(rig.followerDelta, 0, world[n * 12], world[n * 12 + 1], world[n * 12 + 2], world[n * 12 + 3], world[n * 12 + 4], world[n * 12 + 5],
+						world[n * 12 + 6], world[n * 12 + 7], world[n * 12 + 8], world[n * 12 + 9], world[n * 12 + 10], world[n * 12 + 11], moved, 0);
+					for (int i = 0; i < 12; i++) world[n * 12 + i] += (moved[i] - world[n * 12 + i]) * k;
+				}
+			}
 			float gx = world[rig.grip * 12 + 3], gz = world[rig.grip * 12 + 11];
 			if (rig.followerTwist != 0) {
 				for (int n = 0; n < below.length; n++) if (below[n]) turnAboutUp(world, n * 12, rig.followerTwist, gx, gz);
@@ -490,6 +507,38 @@ public final class HeroModel {
 			mul(world, skinNodes[s] * 12, m[ib], m[ib + 1], m[ib + 2], m[ib + 3], m[ib + 4], m[ib + 5], m[ib + 6], m[ib + 7],
 				m[ib + 8], m[ib + 9], m[ib + 10], m[ib + 11], out, s * 12);
 		}
+	}
+
+	/**
+	 * The model-space transform (3x4) of {@code node} from poses alone (no rig): each joint on the way
+	 * down takes its local transform from {@code b} where {@code useB} marks it, from {@code a} otherwise.
+	 */
+	public void chainWorld(Pose a, Pose b, boolean[] useB, int node, float[] out) {
+		int[] path = new int[64];
+		int depth = 0;
+		for (int n = node; n >= 0; n = parents[n]) path[depth++] = n;
+		float[] parent = new float[12];
+		for (int d = depth - 1; d >= 0; d--) {
+			int n = path[d];
+			float[] t = useB != null && useB[n] ? b.trs : a.trs;
+			if (d == depth - 1) local(t, n, out, 0, null, 0);
+			else {
+				System.arraycopy(out, 0, parent, 0, 12);
+				local(t, n, out, 0, parent, 0);
+			}
+		}
+	}
+
+	/** out = a * inverse(b), for affine 3x4 transforms (the export's root carries a scale, so a full inverse). */
+	public static void relative(float[] a, float[] b, float[] out) {
+		float b00 = b[0], b01 = b[1], b02 = b[2], b10 = b[4], b11 = b[5], b12 = b[6], b20 = b[8], b21 = b[9], b22 = b[10];
+		float c00 = b11 * b22 - b12 * b21, c01 = b02 * b21 - b01 * b22, c02 = b01 * b12 - b02 * b11;
+		float c10 = b12 * b20 - b10 * b22, c11 = b00 * b22 - b02 * b20, c12 = b02 * b10 - b00 * b12;
+		float c20 = b10 * b21 - b11 * b20, c21 = b01 * b20 - b00 * b21, c22 = b00 * b11 - b01 * b10;
+		float det = b00 * c00 + b01 * c10 + b02 * c20, inv = det == 0 ? 0 : 1 / det;
+		float i00 = c00 * inv, i01 = c01 * inv, i02 = c02 * inv, i10 = c10 * inv, i11 = c11 * inv, i12 = c12 * inv, i20 = c20 * inv, i21 = c21 * inv, i22 = c22 * inv;
+		float i03 = -(i00 * b[3] + i01 * b[7] + i02 * b[11]), i13 = -(i10 * b[3] + i11 * b[7] + i12 * b[11]), i23 = -(i20 * b[3] + i21 * b[7] + i22 * b[11]);
+		mul(a, 0, i00, i01, i02, i03, i10, i11, i12, i13, i20, i21, i22, i23, out, 0);
 	}
 
 	/** Whether {@code ancestor} is {@code node} or above it. */

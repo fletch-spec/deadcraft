@@ -149,6 +149,7 @@ public final class Follow {
 
 		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z(), HeroRenderer.sliding(), localNow);
 		readAbilities(hero);
+		meleeTravel(hero);
 		readShots(mc, hero);
 		{
 			// Hero model animation: velocity relative to where the body faces.
@@ -269,6 +270,19 @@ public final class Follow {
 		return height > 0.1 && height <= 2.5 ? height : Double.NaN;
 	}
 
+	/** Where the hero was at the last melee event, to log how far Deadlock moves it during a melee (velocity reads 0). */
+	private static Vec3 meleeFrom;
+	private static long meleeAt;
+
+	private static void meleeTravel(HeroState hero) {
+		if (meleeFrom == null || System.nanoTime() - meleeAt < 800_000_000L) return;
+		Vec3 now = Proto.toMinecraft(hero.position);
+		LOG.info("Deadcraft: melee moved the hero {} blocks in 0.8 s (x {}, y {}, z {})",
+			String.format("%.2f", Math.sqrt(Math.pow(now.x() - meleeFrom.x(), 2) + Math.pow(now.z() - meleeFrom.z(), 2))),
+			String.format("%.2f", now.x() - meleeFrom.x()), String.format("%.2f", now.y() - meleeFrom.y()), String.format("%.2f", now.z() - meleeFrom.z()));
+		meleeFrom = null;
+	}
+
 	/** New entries in the plugin's ability ring since the last frame. */
 	private static void readAbilities(HeroState hero) {
 		int newest = hero.abilityEventSerial;
@@ -279,6 +293,10 @@ public final class Follow {
 		for (int serial = lastAbilitySerial + 1; Integer.compareUnsigned(serial, newest) <= 0; serial++) {
 			mapping.readAbilityEvent(serial).ifPresent(e -> {
 				LOG.info("Deadcraft: ability event {} (tick {})", e.abilityName, e.tick);
+				if (e.abilityName.contains("melee")) {
+					meleeFrom = Proto.toMinecraft(hero.position);
+					meleeAt = System.nanoTime();
+				}
 				HeroRenderer.ability(e.abilityName, e.abilityName.contains("mantle") ? ledgeAhead() : Double.NaN);
 				if (e.abilityName.toLowerCase().contains("dash")) DeadlockCamera.dashKick();
 			});

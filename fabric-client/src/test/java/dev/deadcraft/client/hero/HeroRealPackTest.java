@@ -500,6 +500,43 @@ class HeroRealPackTest {
 		assertTrue(anim.debugLine().contains("action NONE"), "half a second after the hit: " + anim.debugLine());
 	}
 
+	/**
+	 * Shooting on the run, the wand stays in the hand as it's held standing: the arms followed the running
+	 * torso and the wand (hanging off the root) kept the clip's angle, outside the hand.
+	 */
+	@Test
+	void wandStaysInTheHandShootingOnTheRun() throws Exception {
+		HeroModel m = celeste();
+		float[] standing = wandInHand(m, 0), running = wandInHand(m, 6);
+		double worst = 0;
+		for (int i = 0; i < running.length; i += 9) {
+			double dot = 0;
+			for (int k = 0; k < 9; k++) dot += standing[i + k] * running[i + k];  // trace(S^T R), the same moment of the clip
+			worst = Math.max(worst, Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, (dot - 1) / 2)))));
+		}
+		assertTrue(worst < 12, "running, the wand turned " + worst + " deg in the hand from how it's held standing");
+	}
+
+	/** The wand's rotation in the hand's frame (3x3, row-major, 9 per frame), 0.4 to 0.9 s after a shot. */
+	private static float[] wandInHand(HeroModel m, double forward) {
+		HeroAnimator anim = new HeroAnimator(m);
+		int hand = m.node("hand_R"), wand = m.node("weapon");
+		float[] out = new float[9 * 60];
+		for (int i = 0; i < 240; i++) {
+			if (i == 60) anim.shot();
+			anim.update(new HeroAnimator.Input(forward, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.ALT_FIRE, false), 1 / 120f);
+			if (i < 110 || i >= 170) continue;  // at full strength (it fades out after a second)
+			float[] w = anim.lastWorld();
+			int f = (i - 110) * 9;
+			for (int r = 0; r < 3; r++) for (int c = 0; c < 3; c++) {
+				float v = 0;
+				for (int k = 0; k < 3; k++) v += w[hand * 12 + k * 4 + r] * w[wand * 12 + k * 4 + c];  // hand^T * wand
+				out[f + r * 3 + c] = v;
+			}
+		}
+		return out;
+	}
+
 	/** A shot right after a reload starts shooting at once (it waited for the reload to fade out, then lagged). */
 	@Test
 	void shotAfterReloadStartsAtOnce() throws Exception {
