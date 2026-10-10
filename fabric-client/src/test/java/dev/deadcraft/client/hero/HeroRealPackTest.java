@@ -386,6 +386,61 @@ class HeroRealPackTest {
 		}
 	}
 
+	/**
+	 * The reload's arms don't move with the camera's pitch: the aimed arms put the hand up to 0.7 m off the
+	 * wand toss's path, and the wand came back to the wrong place (worst in jumps, looking up or down).
+	 */
+	@Test
+	void reloadIgnoresThePitch() throws Exception {
+		HeroModel m = celeste();
+		double[] up = reloadHand(m, -60), down = reloadHand(m, 60);
+		double apart = Math.sqrt(sq(up[0] - down[0]) + sq(up[1] - down[1]) + sq(up[2] - down[2]));
+		assertTrue(apart < 0.15, "mid-reload, looking up or down moved the hand " + apart + " m");
+	}
+
+	/** The hand's place relative to the hips 0.9 s into a reload in the air, looking at {@code pitch}. */
+	private static double[] reloadHand(HeroModel m, float pitch) {
+		HeroAnimator anim = new HeroAnimator(m);
+		int hand = m.node("hand_R"), pelvis = m.node("pelvis");
+		for (int i = 0; i < 168; i++) {
+			float t = i / 120f;
+			boolean air = t > 0.3f;
+			var in = new HeroAnimator.Input(0, 0, air ? 3 : 0, !air, 86, 112, HeroAnimator.Wall.NONE, pitch, HeroAnimator.ALT_FIRE, false, 0xF, t > 0.5f ? (t - 0.5f) / 2 : -1);
+			if (i == 36) anim.ability("citadel_ability_jump", in, Double.NaN);
+			anim.update(in, 1 / 120f);
+		}
+		float[] w = anim.lastWorld();
+		return new double[] {w[hand * 12 + 3] - w[pelvis * 12 + 3], w[hand * 12 + 7] - w[pelvis * 12 + 7], w[hand * 12 + 11] - w[pelvis * 12 + 11]};
+	}
+
+	/**
+	 * The idle doesn't snap back to its start. Standing, Deadlock's hero drifts at about 0.7 blocks/s now
+	 * and then, which switched to running for a moment and restarted the idle on the way back.
+	 */
+	@Test
+	void idleDoesNotRestart() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		var still = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE);
+		var drift = new HeroAnimator.Input(0.7, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE);
+		for (int i = 0; i < 120 * 4; i++) {
+			anim.update(i % 240 < 60 ? drift : still, 1 / 120f);
+			assertTrue(anim.state() == HeroAnimator.State.IDLE, "a standing drift started " + anim.state() + " at " + i / 120f + " s");
+		}
+		// And standing again after a real run carries on the idle where it was, on the running clock.
+		HeroAnimator reference = new HeroAnimator(m);
+		var run = new HeroAnimator.Input(5, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE);
+		anim = new HeroAnimator(m);
+		for (int i = 0; i < 120 + 30 + 120; i++) {
+			reference.update(still, 1 / 120f);
+			anim.update(i >= 120 && i < 150 ? run : still, 1 / 120f);
+		}
+		int hand = m.node("hand_L");
+		float[] x = anim.lastWorld(), y = reference.lastWorld();
+		double d = Math.sqrt(sq(x[hand * 12 + 3] - y[hand * 12 + 3]) + sq(x[hand * 12 + 7] - y[hand * 12 + 7]) + sq(x[hand * 12 + 11] - y[hand * 12 + 11]));
+		assertTrue(d < 0.005, "a second after stopping, the hand is " + d + " m from where an uninterrupted idle has it");
+	}
+
 	/** Looking up raises the head and looking down lowers it, in and out of weapon stance. */
 	@Test
 	void aimFollowsThePitch() throws Exception {

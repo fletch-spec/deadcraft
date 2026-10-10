@@ -57,8 +57,11 @@ public final class HeroAnimator {
 	/** A crouch (eye at crouch height) must hold this long: the eye dips for a tick as a slide ends. */
 	static final float CROUCH_ENTER_S = 0.06f;
 	static final float SLIDE_ENTER_S = 0.03f;
-	/** Run/idle switching with a margin, so speeds near the line don't flicker between the two. */
-	static final double MOVE_START = 0.5, MOVE_STOP = 0.2;
+	/**
+	 * Run/idle switching with a margin, so speeds near the line don't flicker between the two. Standing,
+	 * Deadlock's hero drifts at up to about 0.7 blocks/s now and then (seen in game): not a run.
+	 */
+	static final double MOVE_START = 1.0, MOVE_STOP = 0.3;
 	/** Body turn speed (degrees/s) at which standing feet fully step. */
 	static final float TURN_STEP_RATE = 240f;
 	/** Step cycles per second at full turning speed (1.5 looked like scurrying). */
@@ -164,7 +167,7 @@ public final class HeroAnimator {
 	/** The crossfade time of the current clip change. */
 	private float actionFadeS = ACTION_IN_S;
 	/** The spine's joints (layered over movement as a change) and the arms and wand (played as they are). */
-	private final boolean[] spineChain, limbs;
+	private final boolean[] spineChain, limbs, aimHead;
 	private float combatTime = COMBAT_HOLD_S, stance, aimWeight, orbWeight, sinceShot = 99, pitch;
 	private int meleeCount;
 	private boolean actionDone;
@@ -201,6 +204,8 @@ public final class HeroAnimator {
 		spineChain = new boolean[upper.length];
 		for (String n : new String[] {"spine_0", "spine_1", "spine_2", "spine_3", "neck_0", "head"}) if (model.node(n) >= 0) spineChain[model.node(n)] = true;
 		limbs = model.subtree("clavicle_L", "clavicle_R", "weaponPivot");
+		aimHead = new boolean[upper.length];
+		for (String n : new String[] {"neck_0", "head"}) if (model.node(n) >= 0) aimHead[model.node(n)] = true;
 		legs = model.subtree("leg_upper_L", "leg_upper_R");
 		pelvis = model.node("pelvis");
 		layered = model.subtree("spine_0", "leg_upper_L", "leg_upper_R");
@@ -506,7 +511,7 @@ public final class HeroAnimator {
 
 	/** The standing idle with an additive clip layered on it (fading out over its last tenth of a second). */
 	private void layer(String layerClip) {
-		stanceMix("out_of_combat_stand_idle", "weapon_stand_idle", stateTime, 1);
+		stanceMix("out_of_combat_stand_idle", "weapon_stand_idle", clock, 1);
 		pose.finish();
 		HeroModel.Clip layer = model.clips.get(layerClip);
 		if (layer == null || !layer.additive()) return;
@@ -536,7 +541,9 @@ public final class HeroAnimator {
 	 * the legs only: blended into the whole body they lowered the hips, a visible dip.
 	 */
 	private void idle(boolean crouch) {
-		stanceMix(crouch ? "out_of_combat_crouch_idle" : "out_of_combat_stand_idle", crouch ? "weapon_crouch_idle" : "weapon_stand_idle", stateTime, 1);
+		// On the running clock, not the state's: every return to standing restarted the idle (a visible snap,
+		// often, as standing and running flicker at the edges of a stop).
+		stanceMix(crouch ? "out_of_combat_crouch_idle" : "out_of_combat_stand_idle", crouch ? "weapon_crouch_idle" : "weapon_stand_idle", clock, 1);
 		float w = stepWeight * STEP_WEIGHT;
 		String runPrefix = (stance > 0.5f ? "weapon_" : "out_of_combat_") + (crouch ? "crouch_run_" : "run_");
 		HeroModel.Clip step = model.clips.get(runPrefix + (turnRate > 0 ? "e" : "w"));
@@ -757,9 +764,17 @@ public final class HeroAnimator {
 		aimLayer("aim_dazzling_orb", dir, amount * orbWeight);
 	}
 
+	/**
+	 * While a reload, melee or cast owns the arms and the wand, only the neck and head aim: aimed arms
+	 * moved her hand up to 0.7 m with the pitch, off the path of the reload's wand toss (it came back to
+	 * the wrong place, worst in jumps, looking up or down).
+	 */
 	private void aimLayer(String set, String dir, float weight) {
 		HeroModel.Clip centre = model.clips.get(set), to = model.clips.get(set + dir);
-		if (weight > 0 && centre != null && to != null) top.addLayer(to, centre, clock, weight, aimed);
+		if (weight <= 0 || centre == null || to == null) return;
+		float busy = action == Action.RELOAD || action == Action.MELEE || action == Action.CAST ? smooth(actionWeight) : 0;
+		top.addLayer(to, centre, clock, weight * (1 - busy), aimed);
+		top.addLayer(to, centre, clock, weight * busy, aimHead);
 	}
 
 	private static float approach(float value, float target, float step) {

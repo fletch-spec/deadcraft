@@ -20,8 +20,12 @@ public final class DeadlockCamera {
 
 	private DeadlockCamera() {}
 
-	/** Degrees added to the camera's pitch (negative: up), so Minecraft's crosshair is where Deadlock's shots go. */
-	private static final float AIM_PITCH_OFFSET = -2f;
+	/**
+	 * Degrees added to the camera's pitch (negative: up). None: Deadlock launches shots 2 deg above its
+	 * crosshair so their drop brings them back onto it at range (Celeste's at about 26 blocks); tilting the
+	 * camera to the launch angle put every hit below the crosshair.
+	 */
+	private static final float AIM_PITCH_OFFSET = 0f;
 
 	public static float aimPitchOffset() {
 		return AIM_PITCH_OFFSET;
