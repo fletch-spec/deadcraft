@@ -12,7 +12,7 @@
 
 [protocol]
 magic = 0x54464344          # bytes "DCFT"
-version = 5
+version = 6
 mapping_name = 'Local\Deadcraft'
 mapping_size = 262144
 units_per_block = 64.0      # Source units per Minecraft block (docs/collider-test.md)
@@ -68,6 +68,7 @@ fields = [
   { name = "entity_flags", type = "u32", offset = 0x70, doc = "the engine's entity flag bits (on ground, ducking, ...)" },
   { name = "buttons", type = "u64", offset = 0x78, doc = "buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)" },
   { name = "shot_serial", type = "u32", offset = 0x80, doc = "serial of the newest Shot" },
+  { name = "abilities_ready", type = "u32", offset = 0x84, doc = "bit n: signature ability n+1 is unlocked and off cooldown (a press will cast it)" },
 ]
 
 [[flags]]
@@ -130,6 +131,7 @@ name = "ShotKind"
 values = [
   { name = "fired", value = 1, doc = "CMsgFireBullets" },
   { name = "impact", value = 2, doc = "CMsgBulletImpact" },
+  { name = "ability_fired", value = 3, doc = "CMsgFireBullets for an ability's bullets (not the gun), e.g. Radiant Blast's cone" },
 ]
 
 # ---- Minecraft -> Deadlock ---------------------------------------------------------------------

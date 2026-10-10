@@ -10,7 +10,7 @@ namespace Deadcraft.Protocol;
 public static partial class Proto
 {
 	public const uint Magic = 0x54464344;
-	public const uint Version = 5;
+	public const uint Version = 6;
 	public const string MappingName = @"Local\Deadcraft";
 	public const int MappingSize = 262144;
 	public const float UnitsPerBlock = 64.0f;
@@ -75,6 +75,7 @@ public enum ShotKind : uint
 {
 	Fired = 1,
 	Impact = 2,
+	AbilityFired = 3,
 }
 
 /// <summary>Identifies the mapping and shows which sides are alive.</summary>
@@ -154,6 +155,7 @@ public struct HeroState
 	public const int EntityFlagsAt = 0x70;
 	public const int ButtonsAt = 0x78;
 	public const int ShotSerialAt = 0x80;
+	public const int AbilitiesReadyAt = 0x84;
 
 	public uint Seq;
 	public uint Flags; // HeroFlags
@@ -175,6 +177,7 @@ public struct HeroState
 	public uint EntityFlags; // the engine's entity flag bits (on ground, ducking, ...)
 	public ulong Buttons; // buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)
 	public uint ShotSerial; // serial of the newest Shot
+	public uint AbilitiesReady; // bit n: signature ability n+1 is unlocked and off cooldown (a press will cast it)
 
 	public HeroState() { }
 
@@ -201,6 +204,7 @@ public struct HeroState
 		EntityFlags = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(EntityFlagsAt)),
 		Buttons = BinaryPrimitives.ReadUInt64LittleEndian(s.Slice(ButtonsAt)),
 		ShotSerial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(ShotSerialAt)),
+		AbilitiesReady = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(AbilitiesReadyAt)),
 	};
 
 	/// <summary>Encode into a span that starts at this struct.</summary>
@@ -226,6 +230,7 @@ public struct HeroState
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(EntityFlagsAt), EntityFlags);
 		BinaryPrimitives.WriteUInt64LittleEndian(s.Slice(ButtonsAt), Buttons);
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(ShotSerialAt), ShotSerial);
+		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(AbilitiesReadyAt), AbilitiesReady);
 	}
 }
 

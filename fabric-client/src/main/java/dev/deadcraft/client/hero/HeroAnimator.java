@@ -16,12 +16,18 @@ public final class HeroAnimator {
 	/**
 	 * One frame of what the hero is doing. Speeds in blocks per second, relative to facing; {@code pitch}
 	 * where the camera looks, degrees, positive down; {@code buttons} what the player holds (Deadlock's
-	 * InputButton bits); {@code channeling} whether a signature ability is channelling.
+	 * InputButton bits); {@code channeling} whether a signature ability is channelling; {@code abilitiesReady}
+	 * bit n: signature ability n+1 would cast if pressed.
 	 */
 	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall,
-		float pitch, long buttons, boolean channeling) {
+		float pitch, long buttons, boolean channeling, int abilitiesReady) {
 		public Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall) {
-			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, 0, 0, false);
+			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, 0, 0, false, 0xF);
+		}
+
+		public Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall,
+			float pitch, long buttons, boolean channeling) {
+			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, pitch, buttons, channeling, 0xF);
 		}
 	}
 
@@ -65,8 +71,24 @@ public final class HeroAnimator {
 	static final float COMBAT_HOLD_S = 3f;
 	/** Stance changes, aim strength and actions ease over these. */
 	static final float STANCE_S = 0.25f, AIM_EASE_S = 0.12f, ACTION_IN_S = 0.1f, ACTION_OUT_S = 0.2f;
-	/** The shooting pose holds this long after the last shot. */
-	static final float SHOT_HOLD_S = 0.35f;
+	/** Shots this close together are continuous fire (the loop); the aimed pose holds this long after the last. */
+	static final float FIRE_GAP_S = 0.3f, SHOOT_LINGER_S = 1.0f;
+	/** A cast started on its button with no event (or orb channel) by this long after was refused (on cooldown). */
+	static final float CONFIRM_S = 1.3f;
+	static final String ORB_START = "ability_unicorn_dazzlingorb_start";
+	/**
+	 * Celeste's signature abilities by slot (Deadlock's scripts/heroes.vdata) and the clip each plays. Casts
+	 * start on the button press: the ability event only comes after the cast delay (0.3 s for Radiant
+	 * Blast, about a second for the orb). Luminous Strike aims first and casts on a later click, so it
+	 * waits for its event (null).
+	 */
+	private static final String[] SLOT_NAMES = {"radiantblast", "prismaticguard", "luminousstrike", "dazzlingorb"};
+	private static final String[] SLOT_CLIPS = {"ability_unicorn_radiant_blast", "ability_unicorn_prismaticguard", null, ORB_START};
+
+	/** Deadlock's InputButton bit for signature ability {@code slot} (0 to 3). */
+	static long abilityButton(int slot) {
+		return 0x200000000L << slot;
+	}
 	/** Camera pitch, degrees, at which the aim clips' up and down poses apply fully (their head turns ~60 deg). */
 	static final float AIM_RANGE = 70f;
 
@@ -110,10 +132,18 @@ public final class HeroAnimator {
 	private Action action = Action.NONE;
 	private String actionClip = "";
 	/** Time in the action, its strength, how much of the legs it takes, and its crossfade from the action before. */
-	private float actionTime, actionWeight, actionLegs, actionFade = 1;
+	private float actionTime, clipTime, actionWeight, actionLegs, actionFade = 1;
+	/** The action's own first pose: moving, only its change from this is layered over the movement. */
+	private final HeroModel.Pose actionReference;
+	private String referenceClip = "";
+	/** A cast started from its button, waiting for the event (or channel) that says it happened. */
+	private int pendingSlot = -1;
+	private float pendingTime;
+	private long buttonsBefore;
+	private boolean shotEventsSeen, orbChanneled, actionCancelled;
 	private float combatTime = COMBAT_HOLD_S, stance, aimWeight, orbWeight, sinceShot = 99, pitch;
 	private int meleeCount;
-	private boolean reloadHeld, actionDone;
+	private boolean actionDone;
 	/** A move started by an ability event or the motion, held until it ends. */
 	private State move;
 	private float stateTime, fade = 1, airTime, fadeTime = FADE_S;
@@ -135,6 +165,7 @@ public final class HeroAnimator {
 		steps = model.newPose();
 		top = model.newPose();
 		actionPose = model.newPose();
+		actionReference = model.newPose();
 		actionPrevious = model.newPose();
 		actionMix = model.newPose();
 		// The weapon (hanging off the root) goes with the upper body: the reload tosses it.
@@ -200,6 +231,7 @@ public final class HeroAnimator {
 
 	/** The server fired one of the hero's shots. */
 	public void shot() {
+		shotEventsSeen = true;
 		sinceShot = 0;
 		combatTime = 0;
 	}
@@ -235,37 +267,52 @@ public final class HeroAnimator {
 		} else if (n.contains("melee")) {
 			meleeCount++;
 			startAction(Action.MELEE, (in.grounded() ? "melee_quick_" : "melee_quick_in_air_") + (meleeCount % 2 == 0 ? 2 : 1));
-		} else if (n.contains("dazzlingorb")) {
-			startOrb();
 		} else if (n.startsWith("ability_")) {
-			// Celeste's signature abilities (Deadlock's scripts/heroes.vdata); any other hero's get a generic cast.
-			String clip = n.contains("radiantblast") ? "ability_unicorn_radiant_blast"
-				: n.contains("prismaticguard") ? "ability_unicorn_prismaticguard"
-				: n.contains("luminousstrike") ? "throw" : "cast_start";
-			startAction(Action.CAST, clip);
+			cast(n);
 		}
+	}
+
+	/** A signature ability's event: confirms a cast started from its button, or starts it now. */
+	private void cast(String name) {
+		int slot = -1;
+		for (int i = 0; i < SLOT_NAMES.length; i++) if (name.contains(SLOT_NAMES[i])) slot = i;
+		if (slot >= 0 && slot == pendingSlot) {
+			pendingSlot = -1;
+			return;
+		}
+		if (slot == 3) startOrb();
+		else startAction(Action.CAST, slot < 0 ? "cast_start" : slot == 2 ? "throw" : SLOT_CLIPS[slot]);
 	}
 
 	private void startAction(Action kind, String clip) {
 		// Higher kinds interrupt lower; nothing interrupts the orb but its own end.
 		if (action == Action.ORB && kind != Action.ORB && !actionDone) return;
 		if (kind.ordinal() < action.ordinal() && !actionDone) return;
+		HeroRenderer.LOG.info("Deadcraft: action {} -> {} {}", action, kind, clip);
+		switchClip(clip, 0);
+		action = kind;
+		referenceClip = clip;
+		actionTime = 0;
+		actionDone = actionCancelled = false;
+		orbChanneled = false;
+		pendingSlot = -1;
+		combatTime = 0;
+	}
+
+	/** Plays {@code clip} from {@code time}, crossfading from what the action showed. */
+	private void switchClip(String clip, float time) {
 		if (actionWeight > 0) {
 			actionPrevious.copyFrom(actionMix);
 			actionFade = 0;
 		}
-		HeroRenderer.LOG.info("Deadcraft: action {} -> {} {}", action, kind, clip);
-		action = kind;
 		actionClip = clip;
-		actionTime = 0;
-		actionDone = false;
-		combatTime = 0;
+		clipTime = time;
 	}
 
 	/** Celeste's ultimate: raising the orb, holding it while the ability channels, then throwing it. */
 	private void startOrb() {
 		if (action == Action.ORB && !actionDone) return;
-		startAction(Action.ORB, "ability_unicorn_dazzlingorb_start");
+		startAction(Action.ORB, ORB_START);
 	}
 
 	private void start(State s) {
@@ -472,76 +519,104 @@ public final class HeroAnimator {
 
 	/** Starts, advances and ends the action from the buttons, shots and channel; eases the stance. */
 	private void updateAction(Input in, boolean crouched, float dt) {
-		long b = in.buttons();
-		boolean attack = (b & ATTACK) != 0, reload = (b & RELOAD) != 0;
-		boolean reloadPressed = reload && !reloadHeld;
-		reloadHeld = reload;
+		long b = in.buttons(), pressed = b & ~buttonsBefore;
+		buttonsBefore = b;
+		boolean attack = (b & ATTACK) != 0;
 		sinceShot += dt;
-		boolean shooting = attack || sinceShot < SHOT_HOLD_S;
-		if (shooting || (b & ALT_FIRE) != 0 || action != Action.NONE && !actionDone) combatTime = 0;
+		// The server's shot events when they come (they do on this setup); the fire button otherwise.
+		boolean firing = sinceShot < FIRE_GAP_S || attack && !shotEventsSeen;
+		boolean shooting = firing || attack || sinceShot < SHOOT_LINGER_S;
+		if (firing || (b & ALT_FIRE) != 0 || action != Action.NONE && !actionDone) combatTime = 0;
 		else combatTime += dt;
 		stance = approach(stance, combatTime < COMBAT_HOLD_S ? 1 : 0, dt / STANCE_S);
 
-		if (in.channeling()) startOrb();
-		if (reloadPressed) {
+		for (int slot = 0; slot < SLOT_CLIPS.length; slot++) {
+			if ((pressed & abilityButton(slot)) == 0 || SLOT_CLIPS[slot] == null || (in.abilitiesReady() & 1 << slot) == 0) continue;
+			if (slot == 3) startOrb();
+			else startAction(Action.CAST, SLOT_CLIPS[slot]);
+			if (actionClip.equals(SLOT_CLIPS[slot]) && actionTime == 0) {
+				pendingSlot = slot;
+				pendingTime = 0;
+			}
+		}
+		if (pendingSlot >= 0) {
+			pendingTime += dt;
+			if (pendingSlot == 3 && in.channeling()) {
+				pendingSlot = -1;
+			} else if (pendingTime > CONFIRM_S) {
+				HeroRenderer.LOG.info("Deadcraft: action {} cancelled: no cast came (on cooldown?)", action);
+				pendingSlot = -1;
+				actionDone = actionCancelled = true;
+			}
+		}
+		if (in.channeling()) {
+			startOrb();
+			if (action == Action.ORB) orbChanneled = true;
+		}
+		if ((pressed & RELOAD) != 0) {
 			String clip = !in.grounded() ? "reload_in_air_quick" : state == State.SLIDE ? "reload_slide_quick"
 				: crouched ? "reload_crouch_idle" : speed > MOVE_START ? "reload_run" : "reload_idle";
 			startAction(Action.RELOAD, clip);
 		}
-		if (shooting && (action == Action.NONE || actionDone)) startAction(Action.SHOOT, "shoot_idle_start");
+		if (shooting && firing && action == Action.NONE) startAction(Action.SHOOT, crouched ? "shoot_crouch_start" : "shoot_idle_start");
 		if (action == Action.NONE) return;
 
 		actionTime += dt;
+		clipTime += dt;
 		actionFade = Math.min(1, actionFade + dt / ACTION_IN_S);
 		float left = Float.MAX_VALUE;
 		switch (action) {
 			case SHOOT -> {
-				// The start once, then the loop while the shots keep coming.
+				// The start once (it ends aimed, and holds there between shots), the loop through continuous fire.
 				String set = crouched ? "shoot_crouch_" : "shoot_idle_";
-				actionClip = actionTime < clipDuration(set + "start") ? set + "start" : set + "loop";
-				if (!shooting) actionDone = true;
-				else if (actionDone) actionDone = false;
+				referenceClip = set + "start";
+				float start = clipDuration(set + "start");
+				if (actionTime >= start) {
+					if (firing && !actionClip.equals(set + "loop")) switchClip(set + "loop", 0);
+					else if (!firing && !actionClip.equals(set + "start")) switchClip(set + "start", start);
+				}
+				actionDone = !shooting;
 			}
 			case ORB -> {
-				if (!actionDone && !in.channeling() && actionTime > 0.2f) {
+				if (!actionDone && !in.channeling() && (orbChanneled || actionTime > 3)) {
 					// Thrown: the release, crossfaded from wherever the raise or the hold had got to.
-					actionPrevious.copyFrom(actionMix);
-					actionFade = 0;
-					actionClip = in.grounded() ? "ability_unicorn_dazzlingorb_end" : "ability_unicorn_dazzlingorb_inair_end";
-					actionTime = 0;
+					switchClip(in.grounded() ? "ability_unicorn_dazzlingorb_end" : "ability_unicorn_dazzlingorb_inair_end", 0);
 					actionDone = true;
-				} else if (!actionDone && actionTime >= clipDuration("ability_unicorn_dazzlingorb_start")) {
-					actionClip = "ability_unicorn_dazzlingorb_loop";
+				} else if (!actionDone && actionClip.equals(ORB_START) && clipTime >= clipDuration(ORB_START)) {
+					switchClip("ability_unicorn_dazzlingorb_loop", 0);
 				}
-				if (actionDone) left = clipDuration(actionClip) - actionTime;
+				if (actionDone) left = clipDuration(actionClip) - clipTime;
 			}
 			default -> {
-				left = clipDuration(actionClip) - actionTime;
+				left = clipDuration(actionClip) - clipTime;
 				if (left <= 0) actionDone = true;
 			}
 		}
-		float target = action == Action.SHOOT && actionDone ? 0 : Math.max(0, Math.min(1, left / ACTION_OUT_S));
+		float target = actionCancelled || action == Action.SHOOT && actionDone ? 0 : Math.max(0, Math.min(1, left / ACTION_OUT_S));
 		actionWeight = approach(actionWeight, target, dt / (target > actionWeight ? ACTION_IN_S : ACTION_OUT_S));
 		if (actionDone && actionWeight <= 0) {
 			HeroRenderer.LOG.info("Deadcraft: action {} ended", action);
 			action = Action.NONE;
 		}
-		// The legs too only standing still (crouched only for the clips with crouched versions).
+		// The whole body only standing still (crouched only for the clips with crouched versions); moving
+		// or in the air, the action's motion goes on top of the movement.
 		boolean legs = in.grounded() && (state == State.IDLE || state == State.LAND || state == State.STOP
 			|| state == State.CROUCH_IDLE && (action == Action.SHOOT || action == Action.RELOAD));
 		actionLegs = approach(actionLegs, legs ? 1 : 0, dt / 0.15f);
 		orbWeight = approach(orbWeight, action == Action.ORB && !actionDone ? 1 : 0, dt / AIM_EASE_S);
 	}
 
-	/** Blends the action's clip into {@link #top}: the upper body by its strength, the legs by actionLegs too. */
+	/**
+	 * Puts the action into {@link #top}. Standing still, its clip as it is (whole body); moving or in the
+	 * air, its change from its own first pose on the upper body, over the movement, so the run (or the
+	 * jump) carries on underneath: played as it is, a standing clip held the torso rigid over the legs.
+	 */
 	private void applyAction() {
 		if (action == Action.NONE || actionWeight <= 0) return;
-		HeroModel.Clip c = model.clips.get(actionClip);
+		HeroModel.Clip c = model.clips.get(actionClip), ref = model.clips.get(referenceClip);
 		if (c == null) return;
-		float time = actionTime;
-		if (action == Action.SHOOT && actionClip.endsWith("loop")) time -= clipDuration(actionClip.replace("loop", "start"));
 		actionPose.clear();
-		actionPose.add(c, time, 1);
+		actionPose.add(c, clipTime, 1);
 		actionPose.finish();
 		actionMix.copyFrom(actionPose);
 		if (actionFade < 1) {
@@ -549,8 +624,13 @@ public final class HeroAnimator {
 			actionMix.blendTowards(actionPose, smooth(actionFade));
 		}
 		float w = smooth(actionWeight);
-		top.blendTowards(actionMix, w, upper);
-		if (actionLegs > 0) top.blendTowards(actionMix, w * actionLegs, lower);
+		if (actionLegs < 1 && ref != null) {
+			actionReference.clear();
+			actionReference.add(ref, 0, 1);
+			actionReference.finish();
+			top.addDifference(actionMix, actionReference, w * (1 - actionLegs), upper);
+		}
+		if (actionLegs > 0) top.blendTowards(actionMix, w * actionLegs);
 	}
 
 	/**
@@ -615,6 +695,11 @@ public final class HeroAnimator {
 
 	private static float smooth(float x) {
 		return x * x * (3 - 2 * x);
+	}
+
+	/** How strongly the current action shows (for tests). */
+	float actionWeight() {
+		return action == Action.NONE ? 0 : actionWeight;
 	}
 
 	/** Everything about the current blend, for the spike report. */

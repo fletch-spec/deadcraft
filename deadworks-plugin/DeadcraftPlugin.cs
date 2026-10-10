@@ -44,8 +44,10 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	// Buttons the player holds, from the ability system's think (the only per-tick input Deadworks shows).
 	private ulong _buttons, _loggedButtons;
 	private CCitadelPlayerPawn? _abilitiesLoggedFor;
-	// Logged when they change: fire, alt fire, reload, abilities 1 to 4, melee isn't a button (an event).
-	private const ulong LoggedButtons = (ulong)(InputButton.Attack | InputButton.Attack2 | InputButton.Reload | InputButton.AllAbilities);
+	// Logged when they change: everything but movement, with the raw bits (melee has no named button;
+	// a press should show which bit it is).
+	private const ulong LoggedButtons = ~(ulong)(InputButton.Forward | InputButton.Back | InputButton.MoveLeft | InputButton.MoveRight
+		| InputButton.Jump | InputButton.Duck | InputButton.Speed | InputButton.TurnLeft | InputButton.TurnRight);
 
 	private readonly List<IHandle> _hooks = new();
 	private int _shotsLogged;
@@ -70,11 +72,12 @@ public class DeadcraftPlugin : DeadworksPluginBase
 	{
 		var m = context.Message;
 		bool ours = IsHeroEntity(m.ShooterEntity, out string why);
-		LogShot($"fired from ({m.Origin?.X:F0}, {m.Origin?.Y:F0}, {m.Origin?.Z:F0}) angles ({m.Angles?.X:F1}, {m.Angles?.Y:F1}) shooter {why}{(ours ? "" : " (not the hero)")}");
+		LogShot($"fired from ({m.Origin?.X:F0}, {m.Origin?.Y:F0}, {m.Origin?.Z:F0}) angles ({m.Angles?.X:F1}, {m.Angles?.Y:F1}) gun {m.FiredFromGun} ability-as-bullet {m.AbilityAsBullet} ability {m.Ability} shooter {why}{(ours ? "" : " (not the hero)")}");
 		if (!ours) return HookResult.Continue;
 		_mapping?.AppendShot(new Shot
 		{
-			Kind = (uint)ShotKind.Fired, Tick = (ulong)GlobalVars.TickCount,
+			// The gun's shots drive the shooting animation; abilities (Radiant Blast's cone) fire bullets too.
+			Kind = (uint)(m.FiredFromGun && !m.AbilityAsBullet ? ShotKind.Fired : ShotKind.AbilityFired), Tick = (ulong)GlobalVars.TickCount,
 			Origin = m.Origin is { } o ? new Vector3(o.X, o.Y, o.Z) : Vector3.Zero,
 			Direction = m.Angles is { } a ? new Vector3(a.X, a.Y, a.Z) : Vector3.Zero,
 		});
@@ -172,6 +175,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			if (hero.IsAlive) flags |= HeroFlags.Alive;
 			if (hero.IsOnGround) flags |= HeroFlags.OnGround;
 			if (Channeling(hero)) flags |= HeroFlags.Channeling;
+			state.AbilitiesReady = AbilitiesReady(hero);
 			var stamina = hero.AbilityComponent.ResourceStamina;
 			state.Flags = (uint)flags;
 			state.HeroId = (uint)hero.HeroID;
@@ -190,7 +194,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			if ((_buttons & LoggedButtons) != _loggedButtons)
 			{
 				_loggedButtons = _buttons & LoggedButtons;
-				Log($"buttons {(InputButton)_loggedButtons}");
+				Log($"buttons {(InputButton)_loggedButtons} (0x{_loggedButtons:X})");
 			}
 			if (_abilitiesLoggedFor != hero && hero.IsAlive)
 			{
@@ -268,6 +272,14 @@ public class DeadcraftPlugin : DeadworksPluginBase
 
 	private static readonly EAbilitySlot[] SignatureSlots = [EAbilitySlot.Signature1, EAbilitySlot.Signature2, EAbilitySlot.Signature3, EAbilitySlot.Signature4];
 	private bool _wasChanneling;
+
+	private static uint AbilitiesReady(CCitadelPlayerPawn hero)
+	{
+		uint ready = 0;
+		for (int i = 0; i < SignatureSlots.Length; i++)
+			if (hero.AbilityComponent.GetAbilityBySlot(SignatureSlots[i]) is { IsUnlocked: true, IsOnCooldown: false }) ready |= 1u << i;
+		return ready;
+	}
 
 	private bool Channeling(CCitadelPlayerPawn hero)
 	{

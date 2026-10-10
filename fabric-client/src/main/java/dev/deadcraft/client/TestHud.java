@@ -69,6 +69,19 @@ final class TestHud {
 		windowStart = 0;
 	}
 
+	/**
+	 * A crosshair at the screen's centre while linked: Minecraft draws its own only in first person, and
+	 * the Deadlock camera is third person. Deadlock aims along its camera's ray through the same point.
+	 */
+	static void crosshair(GuiGraphicsExtractor g) {
+		if (!Follow.linked() || !DeadlockCamera.enabled() || Minecraft.getInstance().gui.screen() != null) return;
+		int cx = g.guiWidth() / 2, cy = g.guiHeight() / 2;
+		g.fill(cx - 5, cy - 1, cx + 6, cy + 2, 0x90000000);
+		g.fill(cx - 1, cy - 5, cx + 2, cy + 6, 0x90000000);
+		g.fill(cx - 4, cy, cx + 5, cy + 1, 0xFFFFFFFF);
+		g.fill(cx, cy - 4, cx + 1, cy + 5, 0xFFFFFFFF);
+	}
+
 	/** On screen just frame rate and frame time; the full readout goes to the log every 10 s. */
 	static void draw(GuiGraphicsExtractor g) {
 		if (!enabled || !Follow.linked() || shown.isEmpty()) return;

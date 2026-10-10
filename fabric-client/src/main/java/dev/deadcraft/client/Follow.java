@@ -158,7 +158,7 @@ public final class Follow {
 			double forward = hv.x() * fx + hv.z() * fz, right = -(hv.x() * fz - hv.z() * fx);
 			HeroRenderer.setInput(new HeroAnimator.Input(forward, right, hv.y(), (hero.flags & HeroFlags.ON_GROUND) != 0,
 				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight, wallBeside(mc, player, fx, fz),
-				hero.cameraAngles.x(), hero.buttons, (hero.flags & HeroFlags.CHANNELING) != 0));
+				hero.cameraAngles.x(), hero.buttons, (hero.flags & HeroFlags.CHANNELING) != 0, hero.abilitiesReady));
 			speedMax = Math.max(speedMax, Math.hypot(forward, right));
 		}
 		Vec3 v = Proto.toMinecraft(hero.velocity);
@@ -294,9 +294,11 @@ public final class Follow {
 	private static int crosshairCount, shotsFired;
 
 	/**
-	 * New entries in the plugin's shot ring. A shot fired drives the shooting animation and remembers
-	 * Minecraft's camera ray; each impact is drawn where Deadlock's bullet hit and measured against that
-	 * ray: the angle between them, seen from the camera, is how far Deadlock's crosshair is from Minecraft's.
+	 * New entries in the plugin's shot ring. The server tells the shooter only where each bullet started
+	 * and where it was aimed (no impacts: Deadlock predicts its own), so each one is traced through
+	 * Minecraft's blocks here and drawn: a faint trail and sparks where it hit. Gun shots drive the shooting
+	 * animation, and their hits are measured against Minecraft's crosshair: the angle between where the
+	 * bullet hit and the camera's ray, seen from the camera, is how far Deadlock's aim is from Minecraft's.
 	 */
 	private static void readShots(Minecraft mc, HeroState hero) {
 		int newest = hero.shotSerial;
@@ -306,30 +308,60 @@ public final class Follow {
 		}
 		for (int serial = lastShotSerial + 1; Integer.compareUnsigned(serial, newest) <= 0; serial++) {
 			mapping.readShot(serial).ifPresent(shot -> {
-				if (shot.kind == ShotKind.FIRED) fired(mc, shot);
+				if (shot.kind == ShotKind.FIRED || shot.kind == ShotKind.ABILITY_FIRED) fired(mc, shot);
 				else if (shot.kind == ShotKind.IMPACT) impact(mc, shot);
 			});
 		}
 		lastShotSerial = newest;
 	}
 
+	/** Bullets are traced this far, blocks. */
+	private static final double SHOT_RANGE = 128;
+
 	private static void fired(Minecraft mc, Shot shot) {
-		HeroRenderer.shot();
-		shotsFired++;
+		boolean gun = shot.kind == ShotKind.FIRED;
 		var camera = mc.gameRenderer.mainCamera();
-		var f = camera.forwardVector();
-		fireCamera = camera.position();
-		fireLook = new net.minecraft.world.phys.Vec3(f.x(), f.y(), f.z());
-		// Deadlock's aim for this shot against the angles Minecraft's camera is drawn at (the raw-mouse lead).
-		fireYawDiff = (float) LookPredictor.wrap(-90f - shot.direction.y() - camera.yRot());
-		firePitchDiff = shot.direction.x() - camera.xRot();
+		if (gun) {
+			HeroRenderer.shot();
+			shotsFired++;
+			var f = camera.forwardVector();
+			fireCamera = camera.position();
+			fireLook = new net.minecraft.world.phys.Vec3(f.x(), f.y(), f.z());
+			// Deadlock's aim for this shot against the angles Minecraft's camera is drawn at (the raw-mouse lead).
+			fireYawDiff = (float) LookPredictor.wrap(-90f - shot.direction.y() - camera.yRot());
+			firePitchDiff = shot.direction.x() - camera.xRot();
+		}
+		// Source angles: pitch down, yaw from +x towards +y; Minecraft's axes are (x, z, -y).
+		double pitch = Math.toRadians(shot.direction.x()), yaw = Math.toRadians(shot.direction.y());
+		var dir = new net.minecraft.world.phys.Vec3(Math.cos(pitch) * Math.cos(yaw), -Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
+		var from = toWorld(Proto.toMinecraft(shot.origin));
+		var hit = mc.level.clip(new ClipContext(from, from.add(dir.scale(SHOT_RANGE)), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+		var to = hit.getLocation();
+		double length = to.distanceTo(from);
+		for (double d = 1.5; d < length; d += 1.5) {
+			var p = from.add(dir.scale(d));
+			mc.level.addAlwaysVisibleParticle(ParticleTypes.END_ROD, p.x, p.y, p.z, 0, 0, 0);
+		}
+		if (hit.getType() == HitResult.Type.MISS) return;
+		for (int i = 0; i < 4; i++) mc.level.addAlwaysVisibleParticle(ParticleTypes.ELECTRIC_SPARK, to.x, to.y, to.z, 0, 0, 0);
+		if (gun) measure(mc, to, 0);
 	}
 
+	/** Hero-frame blocks to Minecraft world coordinates (as the player is placed). */
+	private static net.minecraft.world.phys.Vec3 toWorld(Vec3 heroBlocks) {
+		return new net.minecraft.world.phys.Vec3(anchorX + (heroBlocks.x() - heroAnchor.x()), anchorY + (heroBlocks.y() - heroAnchor.y()),
+			anchorZ + (heroBlocks.z() - heroAnchor.z()));
+	}
+
+	/** An impact from the server, if it ever sends them (it doesn't to the shooter on this setup). */
 	private static void impact(Minecraft mc, Shot shot) {
-		Vec3 hit = Proto.toMinecraft(shot.origin);
-		var at = new net.minecraft.world.phys.Vec3(anchorX + (hit.x() - heroAnchor.x()), anchorY + (hit.y() - heroAnchor.y()),
-			anchorZ + (hit.z() - heroAnchor.z()));
+		var at = toWorld(Proto.toMinecraft(shot.origin));
 		for (int i = 0; i < 4; i++) mc.level.addAlwaysVisibleParticle(ParticleTypes.ELECTRIC_SPARK, at.x, at.y, at.z, 0, 0, 0);
+		measure(mc, at, shot.damage);
+	}
+
+	/** How far a gun shot's hit is from Minecraft's crosshair at the shot, logged and averaged. */
+	private static void measure(Minecraft mc, net.minecraft.world.phys.Vec3 at, int damage) {
 		if (fireCamera == null) return;
 		var to = at.subtract(fireCamera);
 		double angle = Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, to.normalize().dot(fireLook)))));
@@ -345,7 +377,7 @@ public final class Follow {
 			LOG.info("Deadcraft: crosshair check: impact {} blocks out, {} deg off Minecraft's crosshair (crosshair target {}); "
 				+ "Deadlock's shot aimed {} deg yaw, {} deg pitch from the camera's angles; damage {}",
 				String.format("%.1f", to.length()), String.format("%.2f", angle), onTarget, String.format("%.2f", fireYawDiff),
-				String.format("%.2f", firePitchDiff), shot.damage);
+				String.format("%.2f", firePitchDiff), damage);
 		}
 	}
 

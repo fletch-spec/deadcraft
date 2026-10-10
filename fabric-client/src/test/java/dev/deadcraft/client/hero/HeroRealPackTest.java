@@ -235,6 +235,86 @@ class HeroRealPackTest {
 		assertTrue(endGap < 0.3, "the wand ended " + endGap + " m from the hand");
 	}
 
+	/**
+	 * Reloading or shooting while running keeps the run's torso motion. Played as they are, the standing
+	 * clips set the spine's joints to standing values over the running hips: the chest swung 25 to 45 deg
+	 * off the run's, back and forth. Now their motion is added to the run's.
+	 */
+	@Test
+	void actionsWhileRunningKeepTheTorsoMoving() throws Exception {
+		HeroModel m = celeste();
+		double[] plain = chestYaw(m, 0, false), reloading = chestYaw(m, HeroAnimator.RELOAD, false), shooting = chestYaw(m, 0, true);
+		double reloadOff = 0, shootOff = 0;
+		for (int i = 0; i < plain.length; i++) {
+			reloadOff += Math.abs(reloading[i] - plain[i]) / plain.length;
+			shootOff += Math.abs(shooting[i] - plain[i]) / plain.length;
+		}
+		assertTrue(shootOff < 10, "shooting while running turns the chest " + shootOff + " deg off the run's on average");
+		assertTrue(reloadOff < 18, "reloading while running turns the chest " + reloadOff + " deg off the run's on average");
+	}
+
+	/** Which way the chest faces (degrees about the vertical), each frame of a second of running after a second to settle. */
+	private static double[] chestYaw(HeroModel m, long pressAtOneSecond, boolean shooting) {
+		HeroAnimator anim = new HeroAnimator(m);
+		int chest = m.node("spine_3");
+		double[] yaw = new double[120];
+		for (int i = 0; i < 240; i++) {
+			float t = i / 120f;
+			long buttons = Math.abs(t - 1) < 0.02 ? pressAtOneSecond : 0;
+			if (shooting && i % 30 == 0) anim.shot();
+			anim.update(new HeroAnimator.Input(6, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, buttons | HeroAnimator.ALT_FIRE, false), 1 / 120f);
+			if (i < 120) continue;
+			float[] w = anim.lastWorld();
+			yaw[i - 120] = Math.toDegrees(Math.atan2(w[chest * 12 + 8], w[chest * 12]));
+		}
+		return yaw;
+	}
+
+	/**
+	 * Single shots a little apart don't snap: the shooting pose holds between them. It used to end half a
+	 * second after each shot and start over at the next, so the arm dropped back and jerked up every shot.
+	 */
+	@Test
+	void singleShotsDoNotSnap() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float weakest = 1;
+		String at = "";
+		for (int i = 0; i < 120 * 5; i++) {
+			if (i % 84 == 0 && i < 120 * 4) anim.shot();  // a tap every 0.7 s for 4 s
+			anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false), 1 / 120f);
+			if (i > 30 && i < 120 * 4 && anim.actionWeight() < weakest) {
+				weakest = anim.actionWeight();
+				at = (i / 120f) + " s (" + anim.debugLine() + ")";
+			}
+		}
+		assertTrue(weakest > 0.95f, "the shooting pose faded to " + weakest + " between shots at " + at);
+	}
+
+	/**
+	 * Abilities start on the button press when they're ready (the event came up to a second later, the
+	 * orb's raise visibly late), not when on cooldown; the orb's event then doesn't start it over.
+	 */
+	@Test
+	void abilitiesStartOnThePress() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		var press = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.abilityButton(0), false, 0b1110);
+		anim.update(press, 1 / 120f);
+		assertTrue(!anim.debugLine().contains("CAST"), "started Radiant Blast while on cooldown: " + anim.debugLine());
+		anim = new HeroAnimator(m);
+		anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.abilityButton(3), false, 0b1111), 1 / 120f);
+		assertTrue(anim.debugLine().contains("ORB ability_unicorn_dazzlingorb_start"), "the orb didn't start on the press: " + anim.debugLine());
+		var idle = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
+		for (int i = 0; i < 100; i++) anim.update(idle, 1 / 120f);
+		anim.ability("ability_unicorn_dazzlingorb", idle, Double.NaN);
+		var channel = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, true);
+		for (int i = 0; i < 240; i++) anim.update(channel, 1 / 120f);
+		assertTrue(anim.debugLine().contains("ability_unicorn_dazzlingorb_loop"), "not holding the orb: " + anim.debugLine());
+		anim.update(idle, 1 / 120f);
+		assertTrue(anim.debugLine().contains("ability_unicorn_dazzlingorb_end"), "the orb wasn't thrown on release: " + anim.debugLine());
+	}
+
 	/** Looking up raises the head and looking down lowers it, in and out of weapon stance. */
 	@Test
 	void aimFollowsThePitch() throws Exception {

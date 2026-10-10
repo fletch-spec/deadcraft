@@ -7,4 +7,5 @@ public final class ShotKind {
 
 	public static final int FIRED = 1;
 	public static final int IMPACT = 2;
+	public static final int ABILITY_FIRED = 3;
 }

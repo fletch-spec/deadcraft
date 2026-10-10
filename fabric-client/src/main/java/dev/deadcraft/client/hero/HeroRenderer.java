@@ -128,6 +128,9 @@ public final class HeroRenderer {
 			renderTypes = types;
 			animator = new HeroAnimator(m);
 			pelvis = m.node("pelvis");
+			boolean[] wand = m.subtree("weaponPivot");
+			wandVertex = new boolean[m.vertexCount()];
+			for (int v = 0; v < wandVertex.length; v++) wandVertex[v] = wand[m.skinNodes[m.joints[v * 4]]];
 			skinned = new float[m.positions.length];
 			skinnedNormals = new float[m.normals.length];
 			problem = "";
@@ -210,6 +213,8 @@ public final class HeroRenderer {
 	private static final double SPIKE_METRES = 2.0;
 	private static long lastSpikeReport;
 	private static int pelvis = -1;
+	/** Vertices hung mainly from the wand (it hangs off the root, below weaponPivot). */
+	private static boolean[] wandVertex = new boolean[0];
 
 	/**
 	 * Logs (at most once a second) when part of the posed model is far from the pelvis, with the
@@ -222,6 +227,7 @@ public final class HeroRenderer {
 		double hx = world[pelvis * 12 + 3], hy = world[pelvis * 12 + 7], hz = world[pelvis * 12 + 11], far = 0;
 		int farV = -1;
 		for (int v = 0, nv = model.vertexCount(); v < nv; v++) {
+			if (wandVertex[v]) continue;  // the reload tosses the wand far above her head
 			double dx = skinned[v * 3] - hx, dy = skinned[v * 3 + 1] - hy, dz = skinned[v * 3 + 2] - hz;
 			double d = dx * dx + dy * dy + dz * dz;
 			if (d > far) {

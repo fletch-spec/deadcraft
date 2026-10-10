@@ -6,7 +6,7 @@ public final class Proto {
 	private Proto() {}
 
 	public static final int MAGIC = 0x54464344;
-	public static final int VERSION = 5;
+	public static final int VERSION = 6;
 	public static final String MAPPING_NAME = "Local\\Deadcraft";
 	public static final int MAPPING_SIZE = 262144;
 	public static final float UNITS_PER_BLOCK = 64.0f;

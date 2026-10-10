@@ -269,20 +269,7 @@ public final class HeroModel {
 					float dw = w * d[3] - x * d[0] - y * d[1] - z * d[2];
 					d[0] = dx; d[1] = dy; d[2] = dz; d[3] = dw;
 				}
-				// The change's rotation, weighted towards no change.
-				float dx = d[0], dy = d[1], dz = d[2], dw = d[3];
-				if (dw < 0) {
-					dx = -dx; dy = -dy; dz = -dz; dw = -dw;
-				}
-				dx *= weight; dy *= weight; dz *= weight; dw = 1 + (dw - 1) * weight;
-				int q = i + 3;
-				float qx = trs[q], qy = trs[q + 1], qz = trs[q + 2], qw = trs[q + 3];
-				// base * change: the change turns the joint within its own (local) frame.
-				trs[q] = qw * dx + qx * dw + qy * dz - qz * dy;
-				trs[q + 1] = qw * dy - qx * dz + qy * dw + qz * dx;
-				trs[q + 2] = qw * dz + qx * dy - qy * dx + qz * dw;
-				trs[q + 3] = qw * dw - qx * dx - qy * dy - qz * dz;
-				normalise(trs, q);
+				turnBy(i + 3, d[0], d[1], d[2], d[3], weight);
 				// Translations: the clip's change from the bind pose, or from the reference's.
 				for (int k = 0; k < 3; k++) {
 					float t = l[c0 * stride + i + k] + (l[c1 * stride + i + k] - l[c0 * stride + i + k]) * ca;
@@ -290,6 +277,43 @@ public final class HeroModel {
 					trs[i + k] += weight * t;
 				}
 			}
+		}
+
+		/**
+		 * Adds the change from pose {@code from} to pose {@code to} ({@code weight} of it) to this pose, for
+		 * the nodes {@code mask} marks, each joint in its own frame: an action's motion on top of other
+		 * movement, keeping that movement (a reload's arm swing over a run).
+		 */
+		public void addDifference(Pose to, Pose from, float weight, boolean[] mask) {
+			if (weight <= 0) return;
+			for (int n = 0, nodes = nodeCount(); n < nodes; n++) {
+				if (!mask[n]) continue;
+				int q = n * TRS + 3;
+				// from^-1 * to
+				float x = -from.trs[q], y = -from.trs[q + 1], z = -from.trs[q + 2], w = from.trs[q + 3];
+				float bx = to.trs[q], by = to.trs[q + 1], bz = to.trs[q + 2], bw = to.trs[q + 3];
+				float dx = w * bx + x * bw + y * bz - z * by;
+				float dy = w * by - x * bz + y * bw + z * bx;
+				float dz = w * bz + x * by - y * bx + z * bw;
+				float dw = w * bw - x * bx - y * by - z * bz;
+				turnBy(q, dx, dy, dz, dw, weight);
+				for (int k = 0; k < 3; k++) trs[n * TRS + k] += weight * (to.trs[n * TRS + k] - from.trs[n * TRS + k]);
+			}
+		}
+
+		/** Turns the rotation at q further by (dx, dy, dz, dw), weighted towards no turn, in the joint's own frame. */
+		private void turnBy(int q, float dx, float dy, float dz, float dw, float weight) {
+			if (dw < 0) {
+				dx = -dx; dy = -dy; dz = -dz; dw = -dw;
+			}
+			dx *= weight; dy *= weight; dz *= weight; dw = 1 + (dw - 1) * weight;
+			float qx = trs[q], qy = trs[q + 1], qz = trs[q + 2], qw = trs[q + 3];
+			// base * change: the change turns the joint within its own (local) frame.
+			trs[q] = qw * dx + qx * dw + qy * dz - qz * dy;
+			trs[q + 1] = qw * dy - qx * dz + qy * dw + qz * dx;
+			trs[q + 2] = qw * dz + qx * dy - qy * dx + qz * dw;
+			trs[q + 3] = qw * dw - qx * dx - qy * dy - qz * dz;
+			normalise(trs, q);
 		}
 
 		/** Moves a node's translation by (dx, dy, dz), in its parent's frame. */
