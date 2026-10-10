@@ -53,6 +53,8 @@ public final class Effects {
 	private static final Map<String, RenderType> types = new HashMap<>();
 	private static Method createType;
 	private static int drawnQuads, framesDrawn;
+	/** Set when drawing failed: effects are off for the session and Minecraft particles stand in. */
+	private static boolean broken;
 	private static double drawNanos;
 
 	/** Sets an effect's control points each frame from its own clock; returns false once it should stop. */
@@ -184,7 +186,7 @@ public final class Effects {
 	 * hit, facing out of the surface. False when there's no effect to play (Minecraft particles stand in).
 	 */
 	public static boolean gunShot(String weapon, Vec3 drawnMuzzle, List<Vec3> path, double step, Vec3 hitNormal) {
-		FxPack p = pack();
+		FxPack p = broken ? null : pack();
 		if (p == null || path.size() < 2) return false;
 		String tracer = p.effect(weapon, GUN_TRACER), muzzle = p.effect(weapon, GUN_MUZZLE), impact = p.effect(weapon, GUN_IMPACT);
 		if (tracer == null) return false;
@@ -217,6 +219,18 @@ public final class Effects {
 	// ---- per frame -------------------------------------------------------------------------------
 
 	private static void render(LevelRenderContext ctx) {
+		if (broken) return;
+		try {
+			renderUnsafe(ctx);
+		} catch (Throwable t) {
+			broken = true;
+			active.clear();
+			problem = "drawing failed: " + t;
+			FxPack.LOG.error("Deadcraft: effects switched off, drawing failed", t);
+		}
+	}
+
+	private static void renderUnsafe(LevelRenderContext ctx) {
 		if (active.isEmpty()) {
 			lastNanos = 0;
 			return;
