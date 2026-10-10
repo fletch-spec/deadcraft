@@ -57,6 +57,8 @@ public final class HeroAnimator {
 	/** A crouch (eye at crouch height) must hold this long: the eye dips for a tick as a slide ends. */
 	static final float CROUCH_ENTER_S = 0.06f;
 	static final float SLIDE_ENTER_S = 0.03f;
+	/** Back up this long before standing: spamming crouch raised the eye for a few hundredths of a second at a time. */
+	static final float CROUCH_EXIT_S = 0.2f;
 	/**
 	 * Run/idle switching with a margin, so speeds near the line don't flicker between the two. Standing,
 	 * Deadlock's hero drifts at up to about 0.7 blocks/s now and then (seen in game): not a run.
@@ -86,8 +88,8 @@ public final class HeroAnimator {
 	static final float SHOOT_RATE = 0.8f;
 	/** Each shot restarts the recoil with this short a crossfade. */
 	static final float RECOIL_FADE_S = 0.05f;
-	/** A held heavy melee repeats when its cooldown allows; the wind-up starts this long before the next hit. */
-	static final float HEAVY_WINDUP_S = 0.45f, HEAVY_MAX_WAIT_S = 1.2f;
+	/** A heavy wind-up held this long with no hit gives up. */
+	static final float HEAVY_MAX_WAIT_S = 1.2f;
 	/** Weapon stance lasts this long after the last shot or action (a guess: unverified against Deadlock). */
 	static final float COMBAT_HOLD_S = 3f;
 	/** Stance changes, aim strength and actions ease over these. */
@@ -163,7 +165,11 @@ public final class HeroAnimator {
 	private long buttonsBefore;
 	private boolean shotEventsSeen, orbChanneled, actionCancelled, reloadSignalSeen, heavy, shotPending, meleeThisPress;
 	/** How long melee has been held (negative: not held); a held heavy melee's repeat interval and time since its last hit. */
-	private float meleeHeld = -1, heavyInterval = 2f, sinceHeavyHit = 99, sinceQuickMelee = 99;
+	private float meleeHeld = -1, heavyInterval = 2f, sinceHeavyHit = 99;
+	/** How long Deadlock's heavy wind-up lasts (learned: from the wind-up's start to the hit's event), and the clip's rate. */
+	private float windupS = 0.5f, actionRate = 1, pressLength;
+	/** How long the eye has been back up after a crouch: spamming crouch flickers it every tenth of a second. */
+	private float uncrouchedTime = 99;
 	/** The crossfade time of the current clip change. */
 	private float actionFadeS = ACTION_IN_S;
 	/** The spine's joints (layered over movement as a change) and the arms and wand (played as they are). */
@@ -298,19 +304,20 @@ public final class HeroAnimator {
 		} else if (n.contains("parry")) {
 			startAction(Action.MELEE, in.grounded() ? "parry" : "parry_inair");
 		} else if (n.contains("melee")) {
-			// A quick melee's event comes as it starts (button still down); a heavy one's at the hit, after the
-			// wind-up the button started, and again every cooldown while the button stays down.
-			if (meleeHeld >= HEAVY_AFTER_S || action == Action.MELEE && heavy && !actionDone) {
-				if (meleeHeld >= 0 && sinceHeavyHit < 4) heavyInterval = sinceHeavyHit;
+			// Deadlock melees at most every ~0.8 s however fast the button is tapped, and says so with this
+			// event: a quick melee's comes as it starts, a heavy one's at the hit (after the wind-up the press
+			// started), and again each cooldown while the button stays down. Only events start strikes.
+			boolean windingUp = action == Action.MELEE && heavy && !actionDone;
+			if (meleeHeld >= HEAVY_AFTER_S || windingUp && meleeHeld < 0 && pressLength >= HEAVY_AFTER_S) {
+				if (sinceHeavyHit < 4) heavyInterval = sinceHeavyHit;
+				if (windingUp) windupS = Math.max(0.2f, Math.min(1f, actionTime));
 				sinceHeavyHit = 0;
-				if (action == Action.MELEE && heavy && !actionDone) switchClip(in.grounded() ? "melee_hit" : "melee_in_air_hit", 0);
+				if (windingUp) switchClip(in.grounded() ? "melee_hit" : "melee_in_air_hit", 0);
 				else startAction(Action.MELEE, in.grounded() ? "melee_hit" : "melee_in_air_hit");
 				heavy = false;
-				meleeThisPress = true;
-			} else if (!meleeThisPress && sinceQuickMelee > 1.0f) {
-				// (In the air the event can come up to a second after a tap's release started the melee.)
+				actionRate = 1;
+			} else {
 				quickMelee(in);
-				meleeThisPress = meleeHeld >= 0;
 			}
 		} else if (n.startsWith("ability_")) {
 			cast(n);
@@ -318,7 +325,6 @@ public final class HeroAnimator {
 	}
 
 	private void quickMelee(Input in) {
-		sinceQuickMelee = 0;
 		meleeCount++;
 		startAction(Action.MELEE, (in.grounded() ? "melee_quick_" : "melee_quick_in_air_") + (meleeCount % 2 == 0 ? 2 : 1));
 	}
@@ -346,6 +352,7 @@ public final class HeroAnimator {
 		actionTime = 0;
 		actionDone = actionCancelled = false;
 		orbChanneled = heavy = false;
+		actionRate = 1;
 		pendingSlot = -1;
 		combatTime = 0;
 	}
@@ -409,7 +416,10 @@ public final class HeroAnimator {
 		boolean crouchState = standingEye > 0 && eye < standingEye * 0.8f;
 		crouchStateTime = crouchState ? crouchStateTime + dt : 0;
 		boolean wasCrouched = state == State.CROUCH_IDLE || state == State.CROUCH_RUN;
-		boolean crouched = crouchStateTime > 0 && (wasCrouched || crouchStateTime >= CROUCH_ENTER_S);
+		uncrouchedTime = crouchState ? 0 : uncrouchedTime + dt;
+		// Crouched once, stay crouched through the eye's brief rises when crouch is spammed.
+		boolean crouched = crouchStateTime > 0 && (wasCrouched || crouchStateTime >= CROUCH_ENTER_S)
+			|| wasCrouched && uncrouchedTime < CROUCH_EXIT_S && !slideState;
 		if (move != null && !moveContinues(in, speed)) move = null;
 		if (move == null && landed && airTimeBefore > LAND_AFTER_S && speed < 2 && !slideState && !crouched) {
 			start(State.LAND);
@@ -424,7 +434,9 @@ public final class HeroAnimator {
 		stateTime += dt;
 		fade = Math.min(1, fade + dt / fadeTime);
 		if (state == State.RUN || state == State.CROUCH_RUN) {
-			float rate = (float) Math.max(0.5, Math.min(2.0, speed / (state == State.RUN ? runSpeed : runSpeed * 0.5)));
+			// Following the speed down to a crawl (spamming crouch slows the hero to ~0.4 blocks/s; at half
+			// rate the legs looked far too fast).
+			float rate = (float) Math.max(0.1, Math.min(2.0, speed / (state == State.RUN ? runSpeed : runSpeed * 0.5)));
 			HeroModel.Clip c = model.clips.get(state == State.RUN ? "out_of_combat_run_n" : "out_of_combat_crouch_run_n");
 			if (c != null) runPhase = (runPhase + dt * rate / c.duration()) % 1f;
 		}
@@ -620,22 +632,22 @@ public final class HeroAnimator {
 			String clip = !in.grounded() || state == State.SLIDE || speed > MOVE_START ? "reload_run" : crouched ? "reload_crouch_idle" : "reload_idle";
 			startAction(Action.RELOAD, clip);
 		}
-		// Melee: a tap is a quick melee (from its event, or the release); held, the heavy one's wind-up, which
-		// holds until its hit's event. Kept held, Deadlock strikes again each cooldown: standing between, the
-		// wind-up timed to the interval measured between hits.
+		// Melee: the press starts the heavy wind-up at once, paced to Deadlock's (learned); a tap's event then
+		// turns it into a quick melee, a hold's event into the hit. Kept held, Deadlock strikes again each
+		// cooldown: standing between, winding up again just before the next hit.
 		sinceHeavyHit += dt;
-		sinceQuickMelee += dt;
 		if ((b & MELEE) != 0) {
-			meleeHeld = meleeHeld < 0 ? 0 : meleeHeld + dt;
-			boolean first = !meleeThisPress && meleeHeld >= HEAVY_AFTER_S;
-			boolean repeat = meleeThisPress && sinceHeavyHit < 4 && sinceHeavyHit >= heavyInterval - HEAVY_WINDUP_S;
-			if ((first || repeat) && !(action == Action.MELEE && (heavy || !actionDone))) {
+			boolean press = meleeHeld < 0;
+			meleeHeld = press ? 0 : meleeHeld + dt;
+			boolean repeat = !press && meleeThisPress && sinceHeavyHit < 4 && sinceHeavyHit >= heavyInterval - windupS;
+			if ((press || repeat) && !(action == Action.MELEE && !actionDone)) {
 				startAction(Action.MELEE, in.grounded() ? "melee_start" : "melee_in_air_start");
 				heavy = action == Action.MELEE;
-				meleeThisPress = true;
+				if (heavy) actionRate = clipDuration(actionClip) / windupS;
 			}
+			meleeThisPress = true;
 		} else if (meleeHeld >= 0) {
-			if (!meleeThisPress) quickMelee(in);
+			pressLength = meleeHeld;
 			meleeHeld = -1;
 			meleeThisPress = false;
 		}
@@ -651,7 +663,7 @@ public final class HeroAnimator {
 		if (action == Action.NONE) return;
 
 		actionTime += dt;
-		clipTime += action == Action.SHOOT ? dt * SHOOT_RATE : dt;
+		clipTime += dt * (action == Action.SHOOT ? SHOOT_RATE : actionRate);
 		if (action == Action.RELOAD && reloadSignalSeen && in.reload() >= 0) clipTime = in.reload() * clipDuration(actionClip);
 		actionFade = Math.min(1, actionFade + dt / actionFadeS);
 		float left = Float.MAX_VALUE;
@@ -680,7 +692,7 @@ public final class HeroAnimator {
 			case MELEE -> {
 				// The heavy wind-up holds on its last frame until the hit (or gives up: released, no hit came).
 				left = heavy ? Float.MAX_VALUE : clipDuration(actionClip) - clipTime;
-				if (heavy && actionTime > HEAVY_MAX_WAIT_S) {
+				if (heavy && actionTime > (meleeHeld < 0 ? windupS + 0.6f : HEAVY_MAX_WAIT_S)) {
 					heavy = false;
 					actionCancelled = actionDone = true;
 				}

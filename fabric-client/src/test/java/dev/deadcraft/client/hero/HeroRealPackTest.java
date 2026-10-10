@@ -339,10 +339,10 @@ class HeroRealPackTest {
 	}
 
 	/**
-	 * Melee from its button. A tap is one quick melee (its event comes while the button is down; the release
-	 * doesn't start another). Held, the heavy wind-up waits for the hit's event; kept held, Deadlock strikes
-	 * again each cooldown: she stands between (the wind-up held its last frame until then), winding up
-	 * again just before the next hit, timed from the interval between hits.
+	 * Melee from its button and Deadlock's events. The press starts the heavy wind-up at once (it used to
+	 * start a quarter second in, and the hit cut it short); a tap's event turns it into a quick melee. Held,
+	 * the hit's event plays the hit; kept held, Deadlock strikes again each cooldown: she stands between,
+	 * winding up again just before the next hit.
 	 */
 	@Test
 	void meleeFollowsItsButton() throws Exception {
@@ -351,6 +351,8 @@ class HeroRealPackTest {
 		var idle = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
 		var held = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.MELEE, false);
 		HeroAnimator anim = new HeroAnimator(m);
+		anim.update(held, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_start"), "the press: " + anim.debugLine());
 		for (int i = 0; i < 5; i++) anim.update(held, dt);
 		anim.ability("ability_melee_unicorn", held, Double.NaN);
 		for (int i = 0; i < 5; i++) anim.update(held, dt);
@@ -372,9 +374,47 @@ class HeroRealPackTest {
 		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "the second hit: " + anim.debugLine());
 	}
 
+	/** Spamming melee: Deadlock strikes about every 0.8 s whatever the taps; one quick melee per strike, not per tap. */
+	@Test
+	void spammedMeleeFollowsTheStrikes() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float dt = 1 / 120f;
+		int strikes = 0, starts = 0;
+		String clip = "";
+		for (int i = 0; i < 120 * 4; i++) {
+			boolean down = i % 24 < 6;  // a tap every 0.2 s
+			var in = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, down ? HeroAnimator.MELEE : 0, false);
+			if (i % 96 == 3) {  // a strike every 0.8 s, its event during a press
+				anim.ability("ability_melee_unicorn", in, Double.NaN);
+				strikes++;
+			}
+			anim.update(in, dt);
+			String now = anim.debugLine().replaceAll(".*action MELEE (melee_quick_\\d).*", "$1");
+			if (now.startsWith("melee_quick") && !now.equals(clip)) starts++;
+			clip = now;
+		}
+		assertTrue(starts == strikes, starts + " quick melees for " + strikes + " strikes");
+	}
+
 	/**
-	 * Melee in the air: the whole body plays the clip (it spins the hips 153 deg and swings the legs), and
-	 * a tap's event coming late after the release doesn't start a second melee.
+	 * Spamming crouch while moving: Deadlock slows the hero to a crawl (~0.4 blocks/s) and the eye bobs up
+	 * for a few hundredths of a second at a time. She stays crouched (the legs move at the crawl's pace).
+	 */
+	@Test
+	void crouchSpamStaysCrouched() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float dt = 1 / 120f;
+		for (int i = 0; i < 120 * 3; i++) {
+			boolean up = i > 60 && i % 17 < 3;  // the eye up for 0.025 s every 0.14 s
+			anim.update(new HeroAnimator.Input(i < 60 ? 5 : 0.4, 0, 0, true, up ? 86 : 55, up ? 112 : 64, HeroAnimator.Wall.NONE), dt);
+			if (i > 120) assertTrue(anim.state() == HeroAnimator.State.CROUCH_RUN, "stood up at " + i / 120f + " s: " + anim.debugLine());
+		}
+	}
+
+	/**
+	 * Melee in the air: the whole body plays the clip (it spins the hips 153 deg and swings the legs).
 	 */
 	@Test
 	void airMeleeIsWholeBody() throws Exception {
@@ -384,12 +424,12 @@ class HeroRealPackTest {
 		var air = new HeroAnimator.Input(4, 0, 1, false, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
 		var airHeld = new HeroAnimator.Input(4, 0, 1, false, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.MELEE, false);
 		for (int i = 0; i < 60; i++) anim.update(air, dt);
-		for (int i = 0; i < 6; i++) anim.update(airHeld, dt);
+		for (int i = 0; i < 3; i++) anim.update(airHeld, dt);
+		anim.ability("ability_melee_unicorn", airHeld, Double.NaN);
+		for (int i = 0; i < 3; i++) anim.update(airHeld, dt);
 		for (int i = 0; i < 60; i++) anim.update(air, dt);
 		assertTrue(anim.debugLine().contains("MELEE melee_quick_in_air_1") && anim.debugLine().contains("legs 1.00"), "mid air melee: " + anim.debugLine());
-		anim.ability("ability_melee_unicorn", air, Double.NaN);
-		anim.update(air, dt);
-		assertTrue(anim.debugLine().contains("MELEE melee_quick_in_air_1"), "the late event started another: " + anim.debugLine());
+
 	}
 
 	/** A shot right after a reload starts shooting at once (it waited for the reload to fade out, then lagged). */
