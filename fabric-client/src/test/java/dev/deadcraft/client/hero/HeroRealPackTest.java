@@ -372,6 +372,26 @@ class HeroRealPackTest {
 		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "the second hit: " + anim.debugLine());
 	}
 
+	/**
+	 * Melee in the air: the whole body plays the clip (it spins the hips 153 deg and swings the legs), and
+	 * a tap's event coming late after the release doesn't start a second melee.
+	 */
+	@Test
+	void airMeleeIsWholeBody() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float dt = 1 / 120f;
+		var air = new HeroAnimator.Input(4, 0, 1, false, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
+		var airHeld = new HeroAnimator.Input(4, 0, 1, false, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.MELEE, false);
+		for (int i = 0; i < 60; i++) anim.update(air, dt);
+		for (int i = 0; i < 6; i++) anim.update(airHeld, dt);
+		for (int i = 0; i < 60; i++) anim.update(air, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_quick_in_air_1") && anim.debugLine().contains("legs 1.00"), "mid air melee: " + anim.debugLine());
+		anim.ability("ability_melee_unicorn", air, Double.NaN);
+		anim.update(air, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_quick_in_air_1"), "the late event started another: " + anim.debugLine());
+	}
+
 	/** A shot right after a reload starts shooting at once (it waited for the reload to fade out, then lagged). */
 	@Test
 	void shotAfterReloadStartsAtOnce() throws Exception {

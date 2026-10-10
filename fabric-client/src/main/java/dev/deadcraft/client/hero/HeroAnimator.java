@@ -307,7 +307,8 @@ public final class HeroAnimator {
 				else startAction(Action.MELEE, in.grounded() ? "melee_hit" : "melee_in_air_hit");
 				heavy = false;
 				meleeThisPress = true;
-			} else if (!meleeThisPress && sinceQuickMelee > 0.6f) {
+			} else if (!meleeThisPress && sinceQuickMelee > 1.0f) {
+				// (In the air the event can come up to a second after a tap's release started the melee.)
 				quickMelee(in);
 				meleeThisPress = meleeHeld >= 0;
 			}
@@ -698,7 +699,9 @@ public final class HeroAnimator {
 		}
 		// The whole body only standing still (crouched only for the clips with crouched versions); moving
 		// or in the air, the action's motion goes on top of the movement.
-		boolean legs = in.grounded() && (state == State.IDLE || state == State.LAND || state == State.STOP
+		// Melee is a whole-body move everywhere: its clips spin the hips (153 deg) and swing the legs, on
+		// the ground and in the air; without them the moving and in-air melee looked wrong.
+		boolean legs = action == Action.MELEE || in.grounded() && (state == State.IDLE || state == State.LAND || state == State.STOP
 			|| state == State.CROUCH_IDLE && (action == Action.SHOOT || action == Action.RELOAD));
 		actionLegs = approach(actionLegs, legs ? 1 : 0, dt / 0.15f);
 		orbWeight = approach(orbWeight, action == Action.ORB && !actionDone ? 1 : 0, dt / AIM_EASE_S);
