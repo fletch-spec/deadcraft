@@ -292,6 +292,41 @@ class HeroRealPackTest {
 	}
 
 	/**
+	 * Holding fire, the arm keeps moving between shots. The loop clip is 0.27 s long and was played once
+	 * per shot then held on its last frame until the next (Celeste fires every 0.58 s): the hand froze for
+	 * a quarter second of every shot ("goes rigid after the first few shots").
+	 */
+	@Test
+	void heldFireKeepsTheArmMoving() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		int hand = m.node("hand_R");
+		float dt = 1 / 120f;
+		float[] before = null;
+		int still = 0, longest = 0;
+		String at = "";
+		var firing = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.ATTACK, false);
+		for (int i = 0; i < 120 * 5; i++) {
+			float t = i * dt;
+			if (i % 70 == 0) anim.shot();  // Celeste's 0.58 s cycle
+			anim.update(firing, dt);
+			float[] w = anim.lastWorld();
+			float[] now = {w[hand * 12 + 3], w[hand * 12 + 7], w[hand * 12 + 11]};
+			if (before != null && t > 1.8f) {
+				// Frozen: under a tenth of a millimetre a frame (an idle's breathing moves it more).
+				double step = Math.sqrt(sq(now[0] - before[0]) + sq(now[1] - before[1]) + sq(now[2] - before[2]));
+				still = step < 1e-4 ? still + 1 : 0;
+				if (still > longest) {
+					longest = still;
+					at = t + " s (" + anim.debugLine() + ")";
+				}
+			}
+			before = now;
+		}
+		assertTrue(longest < 12, "the hand froze for " + longest / 120f + " s holding fire, at " + at);
+	}
+
+	/**
 	 * Abilities start on the button press when they're ready (the event came up to a second later, the
 	 * orb's raise visibly late), not when on cooldown; the orb's event then doesn't start it over.
 	 */

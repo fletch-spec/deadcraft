@@ -695,8 +695,8 @@ public final class HeroAnimator {
 		float left = Float.MAX_VALUE;
 		switch (action) {
 			case SHOOT -> {
-				// The start for the first shot, the loop's recoil restarted by each later one; each holds its
-				// last (aimed) frame until the next shot.
+				// The start for the first shot (held on its last, aimed frame), then the loop, restarted by each
+				// later shot and looping between.
 				referenceClip = (crouched ? "shoot_crouch_" : "shoot_idle_") + "start";
 				actionDone = !shooting;
 			}
@@ -763,8 +763,9 @@ public final class HeroAnimator {
 		if (action == Action.NONE || actionWeight <= 0) return;
 		HeroModel.Clip c = model.clips.get(actionClip), ref = model.clips.get(referenceClip);
 		if (c == null) return;
-		// Shooting clips hold their last frame between shots (the loop clip isn't looped: each shot restarts it).
-		float time = action == Action.SHOOT ? Math.min(clipTime, c.duration()) : clipTime;
+		// The first shot's clip holds its last (aimed) frame until the next shot; the loop clip, restarted by each
+		// later shot, loops until then (0.27 s long against Celeste's 0.58 s cycle: held, the hand froze).
+		float time = action == Action.SHOOT && !c.loop() ? Math.min(clipTime, c.duration()) : clipTime;
 		actionPose.clear();
 		actionPose.add(c, time, 1);
 		actionPose.finish();
