@@ -39,12 +39,37 @@ public final class DeadlockCamera {
 	private static float aimRight, aimUp;
 	private static final float AIM_SHIFT_MAX = 0.75f;
 	private static int aimShots;
+	/** The learned shift is kept between runs (it took about ten shots to settle each time Minecraft started). */
+	private static final java.nio.file.Path AIM_FILE = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("deadcraft-camera.properties");
+
+	static {
+		try (var in = java.nio.file.Files.newBufferedReader(AIM_FILE)) {
+			var p = new java.util.Properties();
+			p.load(in);
+			aimRight = Float.parseFloat(p.getProperty("aimRightBlocks", "0"));
+			aimUp = Float.parseFloat(p.getProperty("aimUpBlocks", "0"));
+		} catch (java.io.IOException | NumberFormatException e) {
+			// none saved yet
+		}
+	}
+
+	private static void saveAim() {
+		var p = new java.util.Properties();
+		p.setProperty("aimRightBlocks", Float.toString(aimRight));
+		p.setProperty("aimUpBlocks", Float.toString(aimUp));
+		try (var out = java.nio.file.Files.newBufferedWriter(AIM_FILE)) {
+			p.store(out, "Deadcraft: where the hero's shots run relative to the camera, learned from shots");
+		} catch (java.io.IOException e) {
+			Follow.LOG.warn("Deadcraft: couldn't save {}: {}", AIM_FILE, e.toString());
+		}
+	}
 
 	static void learnShotLine(double rightBlocks, double upBlocks) {
 		// Each shot's line is measured from the camera as already shifted: move a quarter of the remaining way.
 		aimRight = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimRight + (float) rightBlocks * 0.25f));
 		aimUp = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimUp + (float) upBlocks * 0.25f));
 		if (++aimShots % 10 == 0 || aimShots <= 3) {
+			saveAim();
 			Follow.LOG.info("Deadcraft: camera moved onto the shots' line: {} right, {} up (Source units); last shot's line {} right, {} up of the ray",
 				String.format("%.1f", aimRight * 64), String.format("%.1f", aimUp * 64), String.format("%.2f", rightBlocks * 64), String.format("%.2f", upBlocks * 64));
 		}

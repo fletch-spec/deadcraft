@@ -469,6 +469,37 @@ class HeroRealPackTest {
 		assertTrue(anim.state() == HeroAnimator.State.RUN, "0.1 s after standing up: " + anim.state());
 	}
 
+	/** Reloading standing still leaves the legs in the idle (the clip shuffled the left foot and lifted the knee). */
+	@Test
+	void standingReloadKeepsTheFeet() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m), idle = new HeroAnimator(m);
+		int ankle = m.node("ankle_L");
+		double worst = 0;
+		for (int i = 0; i < 120 * 3; i++) {
+			float t = i / 120f;
+			float reload = t > 0.5f && t < 2.5f ? (t - 0.5f) / 2 : -1;
+			anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.ALT_FIRE, false, 0xF, reload), 1 / 120f);
+			idle.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.ALT_FIRE, false, 0xF, -1), 1 / 120f);
+			float[] a = anim.lastWorld(), b = idle.lastWorld();
+			worst = Math.max(worst, Math.sqrt(sq(a[ankle * 12 + 3] - b[ankle * 12 + 3]) + sq(a[ankle * 12 + 7] - b[ankle * 12 + 7]) + sq(a[ankle * 12 + 11] - b[ankle * 12 + 11])));
+		}
+		assertTrue(worst < 0.03, "the left foot moved " + worst + " m from the idle's during a standing reload");
+	}
+
+	/** The heavy hit ends after the strike (its tail is two settling steps Deadlock doesn't show). */
+	@Test
+	void heavyHitEndsAfterTheStrike() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		var held = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.MELEE, false);
+		var idle = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
+		for (int i = 0; i < 60; i++) anim.update(held, 1 / 120f);
+		anim.ability("ability_melee_unicorn", held, Double.NaN);
+		for (int i = 0; i < 60; i++) anim.update(idle, 1 / 120f);
+		assertTrue(anim.debugLine().contains("action NONE"), "half a second after the hit: " + anim.debugLine());
+	}
+
 	/** A shot right after a reload starts shooting at once (it waited for the reload to fade out, then lagged). */
 	@Test
 	void shotAfterReloadStartsAtOnce() throws Exception {

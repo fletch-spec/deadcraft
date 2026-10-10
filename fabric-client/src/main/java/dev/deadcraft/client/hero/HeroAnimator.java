@@ -90,6 +90,8 @@ public final class HeroAnimator {
 	static final float RECOIL_FADE_S = 0.05f;
 	/** A heavy wind-up held this long with no hit gives up. */
 	static final float HEAVY_MAX_WAIT_S = 1.2f;
+	/** The heavy hit plays this far (the strike), fading out over its last ACTION_OUT_S. */
+	static final float HEAVY_HIT_S = 0.4f;
 	/** Weapon stance lasts this long after the last shot or action (a guess: unverified against Deadlock). */
 	static final float COMBAT_HOLD_S = 3f;
 	/** Stance changes, aim strength and actions ease over these. */
@@ -704,8 +706,11 @@ public final class HeroAnimator {
 				if (left <= 0) actionDone = true;
 			}
 			case MELEE -> {
-				// The heavy wind-up holds on its last frame until the hit (or gives up: released, no hit came).
-				left = heavy ? Float.MAX_VALUE : clipDuration(actionClip) - clipTime;
+				// The heavy wind-up holds on its last frame until the hit (or gives up: released, no hit came). The
+				// hit ends after the strike: the clip's tail is two settling steps Deadlock doesn't show (it read
+				// as four steps: wind-up, lunge, step, step; Deadlock's is two and the horn strike).
+				boolean hit = actionClip.endsWith("hit");
+				left = heavy ? Float.MAX_VALUE : (hit ? Math.min(HEAVY_HIT_S, clipDuration(actionClip)) : clipDuration(actionClip)) - clipTime;
 				if (heavy && actionTime > (meleeHeld < 0 ? windupS + 0.6f : HEAVY_MAX_WAIT_S)) {
 					heavy = false;
 					actionCancelled = actionDone = true;
@@ -728,8 +733,9 @@ public final class HeroAnimator {
 		// or in the air, the action's motion goes on top of the movement.
 		// Melee is a whole-body move everywhere: its clips spin the hips (153 deg) and swing the legs, on
 		// the ground and in the air; without them the moving and in-air melee looked wrong.
-		boolean legs = action == Action.MELEE || in.grounded() && (state == State.IDLE || state == State.LAND || state == State.STOP
-			|| state == State.CROUCH_IDLE && (action == Action.SHOOT || action == Action.RELOAD));
+		// Not reloads: their clips shuffle the left foot and lift the knee; the legs stay in the idle.
+		boolean legs = action == Action.MELEE || action != Action.RELOAD && in.grounded()
+			&& (state == State.IDLE || state == State.LAND || state == State.STOP || state == State.CROUCH_IDLE && action == Action.SHOOT);
 		actionLegs = approach(actionLegs, legs ? 1 : 0, dt / 0.15f);
 		clipLegs = approach(clipLegs, action == Action.MELEE && in.grounded() && speed > MELEE_STEP_SPEED ? 0 : 1, dt / 0.1f);
 		orbWeight = approach(orbWeight, action == Action.ORB && !actionDone ? 1 : 0, dt / AIM_EASE_S);
