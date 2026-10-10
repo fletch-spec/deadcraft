@@ -20,6 +20,8 @@ namespace Deadcraft.HeroExport;
 ///                       "ambient &lt;path&gt;" for the model's own (the horn sparkle)
 /// attachments.txt       per influence: "&lt;attachment&gt; &lt;bone&gt; ox oy oz qx qy qz qw weight"
 ///                       (Source units, in the bone's frame)
+/// bones.txt             the rest pose of those bones and their ancestors: "&lt;bone&gt; &lt;parent or -&gt; px py pz qx qy qz qw"
+///                       (Source units, in the parent's frame), for bones the drawn model leaves out (head_end)
 /// effects/&lt;path&gt;.kv3    each particle system as KV3 text (Deadlock's own definition, every child included)
 /// textures/&lt;path&gt;.png   each texture they draw with, and textures/&lt;path&gt;.sheet for sprite sheets:
 ///                       per sequence "sequence &lt;id&gt; &lt;clamp 0|1&gt; &lt;total time&gt;", then per frame
@@ -60,10 +62,18 @@ internal static class FxPack
 			}
 		}
 		var attachments = new StringBuilder();
+		var bones = new StringBuilder();
+		var bonesWritten = new HashSet<string>();
 		foreach (var (name, attachment) in modelData.Attachments)
 		{
 			foreach (var influence in attachment)
 			{
+				for (var bone = modelData.Skeleton?[influence.Name]; bone != null && bonesWritten.Add(bone.Name); bone = bone.Parent)
+				{
+					string parent = bone.Parent?.Name ?? "-";
+					bones.Append(FormattableString.Invariant(
+						$"{bone.Name} {parent} {bone.Position.X} {bone.Position.Y} {bone.Position.Z} {bone.Angle.X} {bone.Angle.Y} {bone.Angle.Z} {bone.Angle.W}\n"));
+				}
 				attachments.Append(FormattableString.Invariant(
 					$"{name} {influence.Name} {influence.Offset.X} {influence.Offset.Y} {influence.Offset.Z} {influence.Rotation.X} {influence.Rotation.Y} {influence.Rotation.Z} {influence.Rotation.W} {influence.Weight}\n"));
 			}
@@ -127,6 +137,7 @@ internal static class FxPack
 		{
 			Text(zip, "manifest.txt", manifest.ToString());
 			Text(zip, "attachments.txt", attachments.ToString());
+			Text(zip, "bones.txt", bones.ToString());
 			int written = 0;
 			foreach (var (path, text) in effects)
 			{

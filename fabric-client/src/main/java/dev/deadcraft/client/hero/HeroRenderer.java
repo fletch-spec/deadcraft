@@ -63,6 +63,38 @@ public final class HeroRenderer {
 
 	private HeroRenderer() {}
 
+	public static boolean hasBone(String name) {
+		return model != null && model.node(name) >= 0;
+	}
+
+	public static String heroName() {
+		return hero;
+	}
+
+	/** The posed model's frame against the camera at the last draw, and where the camera was then. */
+	private static final Matrix4f lastModelToCamera = new Matrix4f();
+	private static net.minecraft.world.phys.Vec3 lastCamera;
+
+	/**
+	 * Where a point on the drawn hero is in the world: a bone ({@code name} as the export names it) and an
+	 * offset in its frame in Deadlock units (a model attachment, such as the wand's muzzle). Null before the
+	 * hero has been drawn. As of the last frame drawn.
+	 */
+	public static net.minecraft.world.phys.Vec3 boneWorld(String bone, float[] offsetUnits) {
+		if (model == null || animator == null || lastCamera == null) return null;
+		int n = model.node(bone);
+		float[] w = animator.lastWorld();
+		if (n < 0 || w == null || w.length < (n + 1) * 12) return null;
+		float ox = offsetUnits[0] * 0.0254f, oy = offsetUnits[1] * 0.0254f, oz = offsetUnits[2] * 0.0254f;
+		int b = n * 12;
+		float x = w[b] * ox + w[b + 1] * oy + w[b + 2] * oz + w[b + 3];
+		float y = w[b + 4] * ox + w[b + 5] * oy + w[b + 6] * oz + w[b + 7];
+		float z = w[b + 8] * ox + w[b + 9] * oy + w[b + 10] * oz + w[b + 11];
+		Matrix4f m = lastModelToCamera;
+		return lastCamera.add(m.m00() * x + m.m10() * y + m.m20() * z + m.m30(), m.m01() * x + m.m11() * y + m.m21() * z + m.m31(),
+			m.m02() * x + m.m12() * y + m.m22() * z + m.m32());
+	}
+
 	public static Path heroDirectory() {
 		String local = System.getenv("LOCALAPPDATA");
 		return Path.of(local == null ? System.getProperty("user.home") : local, "Deadcraft", "heroes");
@@ -198,6 +230,8 @@ public final class HeroRenderer {
 		// The model faces glTF +Z; Minecraft's yaw 0 faces +Z (south) and turns clockwise seen from above.
 		poseStack.rotateDegrees(Axis.YP, -bodyYaw);
 		poseStack.scale(BLOCKS_PER_METRE * scale, BLOCKS_PER_METRE * scale, BLOCKS_PER_METRE * scale);
+		lastModelToCamera.set(poseStack.last().pose());
+		lastCamera = Minecraft.getInstance().gameRenderer.mainCamera().position();
 		int light = state.lightCoords;
 		for (int i = 0; i < renderTypes.length; i++) {
 			int[] indices = model.materials.get(i).indices();

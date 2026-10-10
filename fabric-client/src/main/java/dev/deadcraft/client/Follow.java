@@ -10,6 +10,7 @@ import dev.deadcraft.protocol.ShotKind;
 import dev.deadcraft.protocol.Vec3;
 import java.util.Optional;
 import dev.deadcraft.client.hero.HeroAnimator;
+import dev.deadcraft.client.fx.Effects;
 import dev.deadcraft.client.hero.HeroRenderer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
@@ -17,6 +18,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import net.minecraft.network.chat.Component;
@@ -373,26 +375,43 @@ public final class Follow {
 		// The bullet's flight: Celeste's drop under gravity, in short straight steps through Minecraft's blocks.
 		var p = from;
 		var v = dir.scale(gun ? BULLET_SPEED : SHOT_RANGE);
-		double step = 1 / 30.0, travelled = 0, sinceTrail = 0;
+		double step = 1 / 30.0, travelled = 0;
 		HitResult hit = null;
+		var path = new java.util.ArrayList<net.minecraft.world.phys.Vec3>();
+		path.add(from);
 		for (double t = 0; t < (gun ? BULLET_LIFETIME : 1) && travelled < SHOT_RANGE; t += step) {
 			var next = p.add(v.scale(step));
 			if (gun) v = v.add(0, -BULLET_GRAVITY * step, 0);
 			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
 			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
-			double seg = end.distanceTo(p);
-			for (double d = 1.5 - sinceTrail; d < seg; d += 1.5) {
-				var q = p.add(end.subtract(p).scale(d / seg));
-				mc.level.addAlwaysVisibleParticle(ParticleTypes.END_ROD, q.x, q.y, q.z, 0, 0, 0);
-			}
-			sinceTrail = (sinceTrail + seg) % 1.5;
-			travelled += seg;
+			travelled += end.distanceTo(p);
+			path.add(end);
 			p = end;
 			if (hit.getType() != HitResult.Type.MISS) break;
 		}
-		if (hit == null || hit.getType() == HitResult.Type.MISS) return;
+		boolean landed = hit instanceof BlockHitResult b && hit.getType() != HitResult.Type.MISS;
+		var normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : null;
+		// Deadlock's own effects for the hero's weapon when exported (hero-export --fx), else Minecraft particles.
+		String weapon = gun ? Effects.weaponName() : Effects.bulletAbilityName();
+		var muzzle = Effects.attachmentWorld("weapon_top_fx");
+		boolean drawn = weapon != null && Effects.gunShot(weapon, muzzle, path, step, normal);
+		if (gun && shotsFired <= 5 && muzzle != null) {
+			LOG.info("Deadcraft: shot {}: drawn wand muzzle {} blocks from Deadlock's muzzle; effects {}", shotsFired,
+				String.format("%.2f", muzzle.distanceTo(from)), drawn ? "played" : "unavailable (" + Effects.problem() + ")");
+		}
+		if (!drawn) {
+			for (int i = 1; i < path.size(); i++) {
+				var a = path.get(i - 1);
+				var q = path.get(i);
+				for (double d = 0; d < a.distanceTo(q); d += 1.5) {
+					var r = a.add(q.subtract(a).normalize().scale(d));
+					mc.level.addAlwaysVisibleParticle(ParticleTypes.END_ROD, r.x, r.y, r.z, 0, 0, 0);
+				}
+			}
+		}
+		if (!landed) return;
 		var to = hit.getLocation();
-		for (int i = 0; i < 4; i++) mc.level.addAlwaysVisibleParticle(ParticleTypes.ELECTRIC_SPARK, to.x, to.y, to.z, 0, 0, 0);
+		if (!drawn) for (int i = 0; i < 4; i++) mc.level.addAlwaysVisibleParticle(ParticleTypes.ELECTRIC_SPARK, to.x, to.y, to.z, 0, 0, 0);
 		if (gun) measure(mc, to, 0);
 	}
 
@@ -456,7 +475,7 @@ public final class Follow {
 			String.format("%.1f", frameMax * 1000), String.format("%.1f", exportMax * 1000),
 			mc.options.framerateLimit().get(), mc.options.enableVsync().get(), look.describe(), rawMouse.reports(),
 			String.format("%.2f", leadFrames == 0 ? 0 : leadSum / leadFrames), String.format("%.1f", leadMax));
-		LOG.info("Deadcraft: {}; top speed {} blocks/s; {}", HeroRenderer.stats(), String.format("%.2f", speedMax), crosshairLine());
+		LOG.info("Deadcraft: {}; {}; top speed {} blocks/s; {}", HeroRenderer.stats(), Effects.stats(), String.format("%.2f", speedMax), crosshairLine());
 		LOG.info("Deadcraft: hud: {}", TestHud.lastLines());
 		speedMax = 0;
 		statsSince = now;

@@ -15,6 +15,7 @@ public final class DeadcraftClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		ClientTickEvents.END_CLIENT_TICK.register(Follow::clientTick);
+		dev.deadcraft.client.fx.Effects.register();
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("deadcraft", "test_hud"), (graphics, delta) -> TestHud.draw(graphics));
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("deadcraft", "crosshair"), (graphics, delta) -> TestHud.crosshair(graphics));
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, context) -> dispatcher.register(
