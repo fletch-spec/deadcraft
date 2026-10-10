@@ -25,6 +25,14 @@ public abstract class CameraMixin {
 	private boolean detached;
 
 	@Shadow
+	private float xRot;
+	@Shadow
+	private float yRot;
+
+	@Shadow
+	protected abstract void setRotation(float yRot, float xRot);
+
+	@Shadow
 	protected abstract void setPosition(double x, double y, double z);
 
 	@Shadow
@@ -39,6 +47,9 @@ public abstract class CameraMixin {
 	private void deadcraft$deadlockCamera(float partialTicks, CallbackInfo ci) {
 		if (!Follow.linked() || !DeadlockCamera.enabled() || entity == null) return;
 		detached = true;
+		// Deadlock's shots leave 2 deg above its view angles (measured: every shot, at every distance), so
+		// its crosshair is on what lies 2 deg above; tilt Minecraft's camera up to match.
+		setRotation(yRot, xRot + DeadlockCamera.aimPitchOffset());
 		// Follow places the player exactly every frame (xo == x), so no partial-tick lerp is needed.
 		setPosition(entity.getX(), entity.getY() + DeadlockCamera.eyeHeightBlocks(), entity.getZ());
 		move(0f, DeadlockCamera.upBlocks(), DeadlockCamera.rightBlocks());  // the third axis points right in 26.3

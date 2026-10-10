@@ -10,7 +10,7 @@ namespace Deadcraft.Protocol;
 public static partial class Proto
 {
 	public const uint Magic = 0x54464344;
-	public const uint Version = 6;
+	public const uint Version = 7;
 	public const string MappingName = @"Local\Deadcraft";
 	public const int MappingSize = 262144;
 	public const float UnitsPerBlock = 64.0f;
@@ -56,6 +56,7 @@ public enum HeroFlags : uint
 	Present = 1u << 0,
 	Alive = 1u << 1,
 	OnGround = 1u << 2,
+	Reloading = 1u << 4,
 	Channeling = 1u << 3,
 }
 
@@ -156,6 +157,7 @@ public struct HeroState
 	public const int ButtonsAt = 0x78;
 	public const int ShotSerialAt = 0x80;
 	public const int AbilitiesReadyAt = 0x84;
+	public const int ReloadFractionAt = 0x88;
 
 	public uint Seq;
 	public uint Flags; // HeroFlags
@@ -178,6 +180,7 @@ public struct HeroState
 	public ulong Buttons; // buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)
 	public uint ShotSerial; // serial of the newest Shot
 	public uint AbilitiesReady; // bit n: signature ability n+1 is unlocked and off cooldown (a press will cast it)
+	public float ReloadFraction; // while the weapon reloads (HeroFlags.reloading), how far through, 0 to 1 (-1 if unknown)
 
 	public HeroState() { }
 
@@ -205,6 +208,7 @@ public struct HeroState
 		Buttons = BinaryPrimitives.ReadUInt64LittleEndian(s.Slice(ButtonsAt)),
 		ShotSerial = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(ShotSerialAt)),
 		AbilitiesReady = BinaryPrimitives.ReadUInt32LittleEndian(s.Slice(AbilitiesReadyAt)),
+		ReloadFraction = Proto.ReadSingle(s, ReloadFractionAt),
 	};
 
 	/// <summary>Encode into a span that starts at this struct.</summary>
@@ -231,6 +235,7 @@ public struct HeroState
 		BinaryPrimitives.WriteUInt64LittleEndian(s.Slice(ButtonsAt), Buttons);
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(ShotSerialAt), ShotSerial);
 		BinaryPrimitives.WriteUInt32LittleEndian(s.Slice(AbilitiesReadyAt), AbilitiesReady);
+		Proto.WriteSingle(s, ReloadFractionAt, ReloadFraction);
 	}
 }
 

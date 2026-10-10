@@ -31,6 +31,7 @@ HeroState.entity_flags = 3
 HeroState.buttons = 0x200000801
 HeroState.shot_serial = 2
 HeroState.abilities_ready = 11
+HeroState.reload_fraction = 0.25
 
 AbilityEvents[0].serial = 1
 AbilityEvents[0].kind = 1

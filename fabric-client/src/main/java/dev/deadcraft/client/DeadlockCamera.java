@@ -20,6 +20,13 @@ public final class DeadlockCamera {
 
 	private DeadlockCamera() {}
 
+	/** Degrees added to the camera's pitch (negative: up), so Minecraft's crosshair is where Deadlock's shots go. */
+	private static final float AIM_PITCH_OFFSET = -2f;
+
+	public static float aimPitchOffset() {
+		return AIM_PITCH_OFFSET;
+	}
+
 	public static boolean enabled() {
 		return enabled;
 	}

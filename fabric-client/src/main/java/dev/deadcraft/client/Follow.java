@@ -158,7 +158,8 @@ public final class Follow {
 			double forward = hv.x() * fx + hv.z() * fz, right = -(hv.x() * fz - hv.z() * fx);
 			HeroRenderer.setInput(new HeroAnimator.Input(forward, right, hv.y(), (hero.flags & HeroFlags.ON_GROUND) != 0,
 				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight, wallBeside(mc, player, fx, fz),
-				hero.cameraAngles.x(), hero.buttons, (hero.flags & HeroFlags.CHANNELING) != 0, hero.abilitiesReady));
+				hero.cameraAngles.x(), hero.buttons, (hero.flags & HeroFlags.CHANNELING) != 0, hero.abilitiesReady,
+				(hero.flags & HeroFlags.RELOADING) == 0 ? -1 : hero.reloadFraction < 0 ? Float.NaN : hero.reloadFraction));
 			speedMax = Math.max(speedMax, Math.hypot(forward, right));
 		}
 		Vec3 v = Proto.toMinecraft(hero.velocity);

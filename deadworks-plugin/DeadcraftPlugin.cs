@@ -176,6 +176,12 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			if (hero.IsOnGround) flags |= HeroFlags.OnGround;
 			if (Channeling(hero)) flags |= HeroFlags.Channeling;
 			state.AbilitiesReady = AbilitiesReady(hero);
+			state.ReloadFraction = -1f;
+			if (Reloading(hero, out float fraction))
+			{
+				flags |= HeroFlags.Reloading;
+				state.ReloadFraction = fraction;
+			}
 			var stamina = hero.AbilityComponent.ResourceStamina;
 			state.Flags = (uint)flags;
 			state.HeroId = (uint)hero.HeroID;
@@ -272,6 +278,43 @@ public class DeadcraftPlugin : DeadworksPluginBase
 
 	private static readonly EAbilitySlot[] SignatureSlots = [EAbilitySlot.Signature1, EAbilitySlot.Signature2, EAbilitySlot.Signature3, EAbilitySlot.Signature4];
 	private bool _wasChanneling;
+
+	private bool _wasReloading, _reportedReloadProblem;
+	private float _reloadLoggedStart = -1f;
+
+	// The primary weapon's reload, manual or automatic (an empty magazine reloads without a button), and how
+	// far through it is: Deadlock plays its reload animation by that fraction, so reload speed carries over.
+	private bool Reloading(CCitadelPlayerPawn hero, out float fraction)
+	{
+		fraction = -1f;
+		var weapon = hero.AbilityComponent.GetAbilityBySlot(EAbilitySlot.WeaponPrimary);
+		if (weapon == null) return false;
+		bool reloading;
+		try
+		{
+			reloading = weapon.GetField<byte>("CCitadel_Ability_PrimaryWeapon"u8, "m_bInReload"u8) != 0;
+			if (reloading)
+			{
+				float start = weapon.GetField<float>("CCitadel_Ability_PrimaryWeapon"u8, "m_flLastReloadStartTime"u8);
+				float end = weapon.GetField<float>("CCitadel_Ability_PrimaryWeapon"u8, "m_flReloadAvailableTime"u8);
+				if (end > start) fraction = Math.Clamp((GlobalVars.CurTime - start) / (end - start), 0f, 1f);
+				if (start != _reloadLoggedStart)
+				{
+					_reloadLoggedStart = start;
+					Log($"reload started at {start:F2}, done at {end:F2} ({end - start:F2} s), clip {weapon.GetField<int>("CCitadel_Ability_PrimaryWeapon"u8, "m_iClip"u8)}");
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			if (!_reportedReloadProblem) Log($"can't read the weapon's reload state: {e.Message}");
+			_reportedReloadProblem = true;
+			return false;
+		}
+		if (reloading != _wasReloading && !reloading) Log("reload finished");
+		_wasReloading = reloading;
+		return reloading;
+	}
 
 	private static uint AbilitiesReady(CCitadelPlayerPawn hero)
 	{

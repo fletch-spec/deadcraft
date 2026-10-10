@@ -17,17 +17,27 @@ public final class HeroAnimator {
 	 * One frame of what the hero is doing. Speeds in blocks per second, relative to facing; {@code pitch}
 	 * where the camera looks, degrees, positive down; {@code buttons} what the player holds (Deadlock's
 	 * InputButton bits); {@code channeling} whether a signature ability is channelling; {@code abilitiesReady}
-	 * bit n: signature ability n+1 would cast if pressed.
+	 * bit n: signature ability n+1 would cast if pressed; {@code reload} how far through the weapon's reload
+	 * (0 to 1, NaN if reloading but unknown how far; negative when not reloading).
 	 */
 	public record Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall,
-		float pitch, long buttons, boolean channeling, int abilitiesReady) {
+		float pitch, long buttons, boolean channeling, int abilitiesReady, float reload) {
 		public Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall) {
-			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, 0, 0, false, 0xF);
+			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, 0, 0, false, 0xF, -1);
 		}
 
 		public Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall,
 			float pitch, long buttons, boolean channeling) {
-			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, pitch, buttons, channeling, 0xF);
+			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, pitch, buttons, channeling, 0xF, -1);
+		}
+
+		public Input(double forward, double right, double up, boolean grounded, float eyeHeight, float hullHeight, Wall wall,
+			float pitch, long buttons, boolean channeling, int abilitiesReady) {
+			this(forward, right, up, grounded, eyeHeight, hullHeight, wall, pitch, buttons, channeling, abilitiesReady, -1);
+		}
+
+		boolean reloading() {
+			return !(reload < 0);
 		}
 	}
 
@@ -65,8 +75,12 @@ public final class HeroAnimator {
 
 	private static final String[] DIRS = {"n", "ne", "e", "se", "s", "sw", "w", "nw"};
 
-	/** Deadlock's InputButton bits for fire, alt fire (zoom) and reload. */
-	static final long ATTACK = 0x1, ALT_FIRE = 0x800, RELOAD = 0x2000;
+	/** Deadlock's InputButton bits for fire, alt fire (zoom), reload and melee (Weapon1, found in game). */
+	static final long ATTACK = 0x1, ALT_FIRE = 0x800, RELOAD = 0x2000, MELEE = 0x100000000L;
+	/** Melee held this long is a heavy melee (the wind-up holds until the hit); shorter, a quick one (by eye: unverified). */
+	static final float HEAVY_AFTER_S = 0.25f;
+	/** The shooting clips play at this rate (at full speed they looked too quick). */
+	static final float SHOOT_RATE = 0.7f;
 	/** Weapon stance lasts this long after the last shot or action (a guess: unverified against Deadlock). */
 	static final float COMBAT_HOLD_S = 3f;
 	/** Stance changes, aim strength and actions ease over these. */
@@ -140,7 +154,9 @@ public final class HeroAnimator {
 	private int pendingSlot = -1;
 	private float pendingTime;
 	private long buttonsBefore;
-	private boolean shotEventsSeen, orbChanneled, actionCancelled;
+	private boolean shotEventsSeen, orbChanneled, actionCancelled, reloadSignalSeen, meleeButtonSeen, heavy;
+	/** How long melee has been held (negative: not held), and since the last melee started from its button. */
+	private float meleeHeld = -1, sinceButtonMelee = 99;
 	private float combatTime = COMBAT_HOLD_S, stance, aimWeight, orbWeight, sinceShot = 99, pitch;
 	private int meleeCount;
 	private boolean actionDone;
@@ -265,11 +281,21 @@ public final class HeroAnimator {
 		} else if (n.contains("parry")) {
 			startAction(Action.MELEE, in.grounded() ? "parry" : "parry_inair");
 		} else if (n.contains("melee")) {
-			meleeCount++;
-			startAction(Action.MELEE, (in.grounded() ? "melee_quick_" : "melee_quick_in_air_") + (meleeCount % 2 == 0 ? 2 : 1));
+			// The event comes at the hit: the button starts melee (wind-up included) when it's been seen.
+			if (action == Action.MELEE && heavy && !actionDone) {
+				switchClip(in.grounded() ? "melee_hit" : "melee_in_air_hit", 0);
+				heavy = false;
+			} else if (!meleeButtonSeen || sinceButtonMelee > 1.5f) {
+				quickMelee(in);
+			}
 		} else if (n.startsWith("ability_")) {
 			cast(n);
 		}
+	}
+
+	private void quickMelee(Input in) {
+		meleeCount++;
+		startAction(Action.MELEE, (in.grounded() ? "melee_quick_" : "melee_quick_in_air_") + (meleeCount % 2 == 0 ? 2 : 1));
 	}
 
 	/** A signature ability's event: confirms a cast started from its button, or starts it now. */
@@ -294,7 +320,7 @@ public final class HeroAnimator {
 		referenceClip = clip;
 		actionTime = 0;
 		actionDone = actionCancelled = false;
-		orbChanneled = false;
+		orbChanneled = heavy = false;
 		pendingSlot = -1;
 		combatTime = 0;
 	}
@@ -553,16 +579,41 @@ public final class HeroAnimator {
 			startOrb();
 			if (action == Action.ORB) orbChanneled = true;
 		}
-		if ((pressed & RELOAD) != 0) {
-			String clip = !in.grounded() ? "reload_in_air_quick" : state == State.SLIDE ? "reload_slide_quick"
-				: crouched ? "reload_crouch_idle" : speed > MOVE_START ? "reload_run" : "reload_idle";
+		// Reload: while Deadlock's weapon reloads (manual, or on its own when the magazine runs dry), at its
+		// progress; the reload press only until that signal has been seen. In the air or sliding, the
+		// running reload's motion (the "quick" in-air and slide clips looked wrong over a jump).
+		if (in.reloading()) reloadSignalSeen = true;
+		boolean reloadStarts = reloadSignalSeen ? in.reloading() && action != Action.RELOAD : (pressed & RELOAD) != 0;
+		if (reloadStarts) {
+			String clip = !in.grounded() || state == State.SLIDE || speed > MOVE_START ? "reload_run" : crouched ? "reload_crouch_idle" : "reload_idle";
 			startAction(Action.RELOAD, clip);
+		}
+		// Melee: a tap is a quick melee; held, the heavy one's wind-up, holding until the hit (release or event).
+		sinceButtonMelee += dt;
+		if ((b & MELEE) != 0) {
+			meleeButtonSeen = true;
+			meleeHeld = meleeHeld < 0 ? 0 : meleeHeld + dt;
+			if (meleeHeld >= HEAVY_AFTER_S && !(action == Action.MELEE && heavy) && sinceButtonMelee > 0.5f) {
+				startAction(Action.MELEE, in.grounded() ? "melee_start" : "melee_in_air_start");
+				heavy = action == Action.MELEE;
+				sinceButtonMelee = 0;
+			}
+		} else if (meleeHeld >= 0) {
+			if (meleeHeld < HEAVY_AFTER_S) {
+				quickMelee(in);
+				sinceButtonMelee = 0;
+			} else if (action == Action.MELEE && heavy && !actionDone) {
+				switchClip(in.grounded() ? "melee_hit" : "melee_in_air_hit", 0);
+				heavy = false;
+			}
+			meleeHeld = -1;
 		}
 		if (shooting && firing && action == Action.NONE) startAction(Action.SHOOT, crouched ? "shoot_crouch_start" : "shoot_idle_start");
 		if (action == Action.NONE) return;
 
 		actionTime += dt;
-		clipTime += dt;
+		clipTime += action == Action.SHOOT ? dt * SHOOT_RATE : dt;
+		if (action == Action.RELOAD && reloadSignalSeen && in.reload() >= 0) clipTime = in.reload() * clipDuration(actionClip);
 		actionFade = Math.min(1, actionFade + dt / ACTION_IN_S);
 		float left = Float.MAX_VALUE;
 		switch (action) {
@@ -571,7 +622,7 @@ public final class HeroAnimator {
 				String set = crouched ? "shoot_crouch_" : "shoot_idle_";
 				referenceClip = set + "start";
 				float start = clipDuration(set + "start");
-				if (actionTime >= start) {
+				if (actionTime * SHOOT_RATE >= start) {
 					if (firing && !actionClip.equals(set + "loop")) switchClip(set + "loop", 0);
 					else if (!firing && !actionClip.equals(set + "start")) switchClip(set + "start", start);
 				}
@@ -586,6 +637,17 @@ public final class HeroAnimator {
 					switchClip("ability_unicorn_dazzlingorb_loop", 0);
 				}
 				if (actionDone) left = clipDuration(actionClip) - clipTime;
+			}
+			case RELOAD -> {
+				// Over when the weapon says so (or at the clip's end without that signal).
+				left = reloadSignalSeen ? (in.reloading() ? Float.MAX_VALUE : 0) : clipDuration(actionClip) - clipTime;
+				if (left <= 0) actionDone = true;
+			}
+			case MELEE -> {
+				// The heavy wind-up holds on its last frame until the hit.
+				left = heavy ? Float.MAX_VALUE : clipDuration(actionClip) - clipTime;
+				if (heavy && actionTime > 3) heavy = false;
+				if (left <= 0) actionDone = true;
 			}
 			default -> {
 				left = clipDuration(actionClip) - clipTime;

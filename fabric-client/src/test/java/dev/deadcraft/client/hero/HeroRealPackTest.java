@@ -315,6 +315,50 @@ class HeroRealPackTest {
 		assertTrue(anim.debugLine().contains("ability_unicorn_dazzlingorb_end"), "the orb wasn't thrown on release: " + anim.debugLine());
 	}
 
+	/**
+	 * Reloads follow the weapon: an empty magazine reloads with no button (holding fire never showed one),
+	 * the clip follows Deadlock's progress, and in the air it's the running reload's motion (the in-air
+	 * clip looked broken over a jump).
+	 */
+	@Test
+	void reloadFollowsTheWeapon() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float dt = 1 / 120f;
+		String during = "", after = "";
+		for (int i = 0; i < 120 * 3; i++) {
+			float t = i * dt;
+			boolean air = t > 0.5f;
+			float reload = t > 0.6f && t < 2.1f ? (t - 0.6f) / 1.5f : -1;
+			anim.update(new HeroAnimator.Input(0, 0, air ? 1 : 0, !air, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.ATTACK, false, 0xF, reload), dt);
+			if (Math.abs(t - 1.35f) < dt / 2) during = anim.debugLine();
+			if (Math.abs(t - 2.6f) < dt / 2) after = anim.debugLine();
+		}
+		assertTrue(during.contains("RELOAD reload_run 0.75 s"), "mid-reload in the air: " + during);
+		assertTrue(!after.contains("RELOAD"), "still reloading after the weapon finished: " + after);
+	}
+
+	/** Melee from its button: a tap is a quick melee; held, the heavy wind-up holds, and the hit plays on release. */
+	@Test
+	void meleeFollowsItsButton() throws Exception {
+		HeroModel m = celeste();
+		float dt = 1 / 120f;
+		var idle = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
+		var held = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.MELEE, false);
+		HeroAnimator anim = new HeroAnimator(m);
+		for (int i = 0; i < 10; i++) anim.update(held, dt);
+		anim.update(idle, dt);
+		anim.ability("ability_melee_unicorn", idle, Double.NaN);
+		assertTrue(anim.debugLine().contains("MELEE melee_quick_1"), "a tap: " + anim.debugLine());
+		anim = new HeroAnimator(m);
+		for (int i = 0; i < 120; i++) anim.update(held, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_start"), "held a second: " + anim.debugLine());
+		anim.update(idle, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "released: " + anim.debugLine());
+		anim.ability("ability_melee_unicorn", idle, Double.NaN);
+		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "the hit's event started it over: " + anim.debugLine());
+	}
+
 	/** Looking up raises the head and looking down lowers it, in and out of weapon stance. */
 	@Test
 	void aimFollowsThePitch() throws Exception {

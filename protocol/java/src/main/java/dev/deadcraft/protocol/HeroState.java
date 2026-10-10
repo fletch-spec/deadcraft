@@ -28,6 +28,7 @@ public final class HeroState {
 	public static final int BUTTONS_AT = 0x78;
 	public static final int SHOT_SERIAL_AT = 0x80;
 	public static final int ABILITIES_READY_AT = 0x84;
+	public static final int RELOAD_FRACTION_AT = 0x88;
 
 	public int seq;  // unsigned
 	public int flags;  // HeroFlags
@@ -50,6 +51,7 @@ public final class HeroState {
 	public long buttons;  // buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)
 	public int shotSerial;  // serial of the newest Shot
 	public int abilitiesReady;  // bit n: signature ability n+1 is unlocked and off cooldown (a press will cast it)
+	public float reloadFraction;  // while the weapon reloads (HeroFlags.reloading), how far through, 0 to 1 (-1 if unknown)
 
 	/** Decode from a little-endian buffer; {@code at} is where this struct starts. */
 	public static HeroState read(ByteBuffer b, int at) {
@@ -75,6 +77,7 @@ public final class HeroState {
 		v.buttons = b.getLong(at + BUTTONS_AT);
 		v.shotSerial = b.getInt(at + SHOT_SERIAL_AT);
 		v.abilitiesReady = b.getInt(at + ABILITIES_READY_AT);
+		v.reloadFraction = b.getFloat(at + RELOAD_FRACTION_AT);
 		return v;
 	}
 
@@ -101,6 +104,7 @@ public final class HeroState {
 		b.putLong(at + BUTTONS_AT, buttons);
 		b.putInt(at + SHOT_SERIAL_AT, shotSerial);
 		b.putInt(at + ABILITIES_READY_AT, abilitiesReady);
+		b.putFloat(at + RELOAD_FRACTION_AT, reloadFraction);
 	}
 
 	@Override
@@ -126,16 +130,17 @@ public final class HeroState {
 			&& entityFlags == v.entityFlags
 			&& buttons == v.buttons
 			&& shotSerial == v.shotSerial
-			&& abilitiesReady == v.abilitiesReady;
+			&& abilitiesReady == v.abilitiesReady
+			&& Float.compare(reloadFraction, v.reloadFraction) == 0;
 	}
 
 	@Override
 	public int hashCode() {
-		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial, recenterSerial, recenterDelta, hullHeight, entityFlags, buttons, shotSerial, abilitiesReady);
+		return java.util.Objects.hash(seq, flags, tick, serverTime, heroId, position, velocity, eyePosition, cameraAngles, stamina, staminaMax, health, healthMax, abilityEventSerial, recenterSerial, recenterDelta, hullHeight, entityFlags, buttons, shotSerial, abilitiesReady, reloadFraction);
 	}
 
 	@Override
 	public String toString() {
-		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + ", " + "recenterSerial=" + recenterSerial + ", " + "recenterDelta=" + recenterDelta + ", " + "hullHeight=" + hullHeight + ", " + "entityFlags=" + entityFlags + ", " + "buttons=" + buttons + ", " + "shotSerial=" + shotSerial + ", " + "abilitiesReady=" + abilitiesReady + "]";
+		return "HeroState[" + "seq=" + seq + ", " + "flags=" + flags + ", " + "tick=" + tick + ", " + "serverTime=" + serverTime + ", " + "heroId=" + heroId + ", " + "position=" + position + ", " + "velocity=" + velocity + ", " + "eyePosition=" + eyePosition + ", " + "cameraAngles=" + cameraAngles + ", " + "stamina=" + stamina + ", " + "staminaMax=" + staminaMax + ", " + "health=" + health + ", " + "healthMax=" + healthMax + ", " + "abilityEventSerial=" + abilityEventSerial + ", " + "recenterSerial=" + recenterSerial + ", " + "recenterDelta=" + recenterDelta + ", " + "hullHeight=" + hullHeight + ", " + "entityFlags=" + entityFlags + ", " + "buttons=" + buttons + ", " + "shotSerial=" + shotSerial + ", " + "abilitiesReady=" + abilitiesReady + ", " + "reloadFraction=" + reloadFraction + "]";
 	}
 }

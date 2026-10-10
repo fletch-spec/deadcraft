@@ -12,7 +12,7 @@
 
 [protocol]
 magic = 0x54464344          # bytes "DCFT"
-version = 6
+version = 7
 mapping_name = 'Local\Deadcraft'
 mapping_size = 262144
 units_per_block = 64.0      # Source units per Minecraft block (docs/collider-test.md)
@@ -69,6 +69,7 @@ fields = [
   { name = "buttons", type = "u64", offset = 0x78, doc = "buttons the player holds (Deadlock InputButton bits: 0x1 attack, 0x800 alt fire, 0x2000 reload, 0x200000000 << n ability n+1, ...)" },
   { name = "shot_serial", type = "u32", offset = 0x80, doc = "serial of the newest Shot" },
   { name = "abilities_ready", type = "u32", offset = 0x84, doc = "bit n: signature ability n+1 is unlocked and off cooldown (a press will cast it)" },
+  { name = "reload_fraction", type = "f32", offset = 0x88, doc = "while the weapon reloads (HeroFlags.reloading), how far through, 0 to 1 (-1 if unknown)" },
 ]
 
 [[flags]]
@@ -77,6 +78,7 @@ values = [
   { name = "present", bit = 0, doc = "a human player's hero pawn exists" },
   { name = "alive", bit = 1 },
   { name = "on_ground", bit = 2 },
+  { name = "reloading", bit = 4, doc = "the primary weapon is reloading (manual or automatic, CCitadel_Ability_PrimaryWeapon.m_bInReload)" },
   { name = "channeling", bit = 3, doc = "one of the hero's signature abilities is channelling (e.g. Celeste holding her Dazzling Orb)" },
 ]
 
