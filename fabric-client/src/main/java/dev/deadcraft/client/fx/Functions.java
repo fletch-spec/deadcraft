@@ -120,6 +120,7 @@ final class Functions {
 		return switch (cls) {
 			case "C_OP_InstantaneousEmitter" -> new InstantaneousEmitter(m, c);
 			case "C_OP_ContinuousEmitter" -> new ContinuousEmitter(m, c);
+			case "C_OP_NoiseEmitter" -> new NoiseEmitter(m, c);
 			default -> null;
 		};
 	}
@@ -164,6 +165,7 @@ final class Functions {
 			case "C_OP_ClampScalar" -> new ClampScalar(m, c);
 			case "C_OP_EndCapDecay" -> new EndCapDecay(m, c);
 			case "C_OP_AlphaDecay" -> new AlphaDecay(m, c);
+			case "C_OP_DistanceToTransform" -> new DistanceToTransform(m, c);
 			// Orientation bookkeeping with no visible effect on camera-facing sprites: accepted, not run.
 			case "C_OP_NormalLock", "C_OP_RemapTransformOrientationToRotations", "C_OP_RemapTransformOrientationToYaw" -> new NoOp(m, c);
 			default -> null;
@@ -173,6 +175,7 @@ final class Functions {
 	static PreEmission preEmission(String cls, Map<String, Object> m, Compiler c) {
 		return switch (cls) {
 			case "C_OP_SetControlPointToVectorExpression" -> new SetControlPointToVectorExpression(m, c);
+			case "C_OP_RemapSpeedtoCP" -> new RemapSpeedtoCP(m, c);
 			default -> null;
 		};
 	}
@@ -250,19 +253,70 @@ final class Functions {
 			float elapsed = sys.age - startAge, frameStart = elapsed - dt;
 			float start = startTime.get(null, sys), dur = duration.get(null, sys);
 			float windowStart = Math.max(frameStart, start), windowEnd = dur > 0 ? Math.min(elapsed, start + dur) : elapsed;
+			if (windowEnd > windowStart) charge = charge(sys, charge, rate.get(null, sys) * strength, windowStart, windowEnd, elapsed);
+			if (dur > 0 && elapsed > start + dur) finished = true;
+		}
+	}
+
+	/** Emits at a rate over a window of the emitter's time, spread through it; returns the left-over charge. */
+	static double charge(FxSystem sys, double charge, float rate, float windowStart, float windowEnd, float elapsed) {
+		if (rate <= 0) return charge;
+		double before = charge;
+		charge += rate * (windowEnd - windowStart);
+		int n = (int) Math.floor(charge + 0.001);
+		charge -= n;
+		for (int i = 0; i < n; i++) {
+			// Spread over the window: the first is the oldest.
+			double at = windowStart + ((i + 1 - before) / rate);
+			sys.emit((float) Math.max(0, elapsed - Math.min(windowEnd, at)));
+		}
+		return charge;
+	}
+
+	/** Emits at a rate that wanders with noise between a minimum and a maximum. */
+	static final class NoiseEmitter extends Emitter {
+		private final FloatInput duration, startTime, noiseScale, outMin, outMax;
+		private final float offset;
+		private final boolean absVal, absInv;
+		private final int scaleCp, scaleField;
+		private double charge;
+
+		NoiseEmitter(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			duration = Inputs.floatInput(m.get("m_flEmissionDuration"), 0, c);
+			startTime = Inputs.floatInput(m.get("m_flStartTime"), 0, c);
+			noiseScale = Inputs.floatInput(m.get("m_flNoiseScale"), 0.1f, c);
+			outMin = Inputs.floatInput(m.get("m_flOutputMin"), 0, c);
+			outMax = Inputs.floatInput(m.get("m_flOutputMax"), 100, c);
+			offset = Kv3.f(m, "m_flOffset", 0);
+			absVal = Kv3.b(m, "m_bAbsVal", false);
+			absInv = Kv3.b(m, "m_bAbsValInv", false);
+			scaleCp = Kv3.i(m, "m_nScaleControlPoint", -1);
+			scaleField = Kv3.i(m, "m_nScaleControlPointField", 0);
+		}
+
+		@Override
+		void start(FxSystem sys) {
+			super.start(sys);
+			charge = 1;
+		}
+
+		@Override
+		void emit(FxSystem sys, float dt, float strength) {
+			if (finished) return;
+			float elapsed = sys.age - startAge, frameStart = elapsed - dt;
+			float start = startTime.get(null, sys), dur = duration.get(null, sys);
+			float windowStart = Math.max(frameStart, start), windowEnd = dur > 0 ? Math.min(elapsed, start + dur) : elapsed;
 			if (windowEnd > windowStart) {
-				float r = rate.get(null, sys) * strength;
-				if (r > 0) {
-					double before = charge;
-					charge += r * (windowEnd - windowStart);
-					int n = (int) Math.floor(charge + 0.001);
-					charge -= n;
-					for (int i = 0; i < n; i++) {
-						// Spread over the window: the first is the oldest.
-						double at = windowStart + ((i + 1 - before) / r);
-						sys.emit((float) Math.max(0, elapsed - Math.min(windowEnd, at)));
-					}
-				}
+				float t = (elapsed + offset) * noiseScale.get(null, sys);
+				float n = Noise.value3(t, t, t);
+				float absScale = absVal ? 1 : 0.5f;
+				float norm = absVal ? Math.abs(n) : n;
+				if (absInv) norm = 1 - norm;
+				float lo = outMin.get(null, sys), span = outMax.get(null, sys) - lo;
+				float rate = Math.max(0, lo + (1 - absScale) * span + absScale * span * norm) * strength;
+				if (scaleCp >= 0 && scaleField >= 0 && scaleField <= 2) rate *= Math.max(0, sys.cp(scaleCp).pos[scaleField]);
+				charge = charge(sys, charge, rate, windowStart, windowEnd, elapsed);
 			}
 			if (dur > 0 && elapsed > start + dur) finished = true;
 		}
@@ -1022,6 +1076,55 @@ final class Functions {
 		}
 	}
 
+	/** A particle's distance from a control point, remapped into a field (flames thin out away from the wand). */
+	static final class DistanceToTransform extends Operator {
+		private final int field;
+		private final FloatInput inMin, inMax, outMin, outMax;
+		private final Transform start;
+		private final String method;
+		private final boolean activeRange, additive;
+		private final VecInput scale;
+		private final float[] sc = new float[3];
+
+		DistanceToTransform(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			field = Kv3.i(m, "m_nFieldOutput", Particle.RADIUS);
+			inMin = Inputs.floatInput(m.get("m_flInputMin"), 0, c);
+			inMax = Inputs.floatInput(m.get("m_flInputMax"), 128, c);
+			outMin = Inputs.floatInput(m.get("m_flOutputMin"), 0, c);
+			outMax = Inputs.floatInput(m.get("m_flOutputMax"), 1, c);
+			start = Transform.parse(m.get("m_TransformStart"), Kv3.i(m, "m_nStartCP", 0));
+			method = Kv3.s(m, "m_nSetMethod", "PARTICLE_SET_REPLACE_VALUE");
+			activeRange = Kv3.b(m, "m_bActiveRange", false);
+			additive = Kv3.b(m, "m_bAdditive", false);
+			scale = Inputs.vecInput(m.get("m_vecComponentScale"), 1, 1, 1, c);
+		}
+
+		@Override
+		void operate(FxSystem sys, float dt, float strength) {
+			float[] o = start.get(sys).pos;
+			boolean alpha = field == Particle.ALPHA || field == Particle.ALPHA2;
+			for (Particle p : sys.particles) {
+				float a = inMin.get(p, sys), b = inMax.get(p, sys), lo = outMin.get(p, sys), hi = outMax.get(p, sys);
+				scale.get(p, sys, sc);
+				float dx = (p.pos[0] - o[0]) * sc[0], dy = (p.pos[1] - o[1]) * sc[1], dz = (p.pos[2] - o[2]) * sc[2];
+				float d2 = dx * dx + dy * dy + dz * dz, a2 = a * a, b2 = b * b;
+				boolean pass = !activeRange || (d2 <= b2 && a2 <= d2);
+				if (!pass) continue;
+				if (alpha) {
+					lo = Inputs.clamp01(lo);
+					hi = Inputs.clamp01(hi);
+				}
+				float t = Inputs.clamp01((d2 - a2) / (b2 == a2 ? 1 : b2 - a2));
+				float value = lo + (hi - lo) * t;
+				float current = p.scalar(field);
+				float target = setMethod(method, value, p.initialScalar(field), current, dt);
+				float delta = (target - current) * strength;
+				p.setScalar(field, additive ? current + (current + delta) : current + delta);
+			}
+		}
+	}
+
 	static final class EndCapTimedDecay extends Operator {
 		private final FloatInput time;
 
@@ -1211,6 +1314,43 @@ final class Functions {
 				r[2] = a[0] * b[1] - a[1] * b[0];
 			}
 			sys.setCpValue(out, r);
+		}
+	}
+
+	/** A control point's speed, remapped into one component of another (the wand's flame streams as it moves). */
+	static final class RemapSpeedtoCP extends PreEmission {
+		private final int in, out, field;
+		private final float inMin, inMax, outMin, outMax;
+		private final boolean deltaV;
+		private final float[] previous = new float[3];
+
+		RemapSpeedtoCP(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			in = Kv3.i(m, "m_nInControlPointNumber", 0);
+			out = Kv3.i(m, "m_nOutControlPointNumber", -1);
+			field = Kv3.i(m, "m_nField", 0);
+			inMin = Kv3.f(m, "m_flInputMin", 0);
+			inMax = Kv3.f(m, "m_flInputMax", 1);
+			outMin = Kv3.f(m, "m_flOutputMin", 0);
+			outMax = Kv3.f(m, "m_flOutputMax", 1);
+			deltaV = Kv3.b(m, "m_bUseDeltaV", false);
+		}
+
+		@Override
+		void operate(FxSystem sys, float dt) {
+			if (out < 0 || field < 0 || field > 2 || dt <= 0) return;
+			float[] v = sys.cp(in).vel;
+			float speed;
+			if (deltaV) {
+				speed = (float) Math.sqrt(sq(v[0] - previous[0]) + sq(v[1] - previous[1]) + sq(v[2] - previous[2]));
+				System.arraycopy(v, 0, previous, 0, 3);
+			} else {
+				speed = Inputs.len(v);
+			}
+			float t = Inputs.clamp01(Inputs.remap(speed, inMin, inMax));
+			ControlPoint cp = sys.cp(out);
+			cp.pos[field] = outMin + (outMax - outMin) * t;
+			cp.set = true;
 		}
 	}
 

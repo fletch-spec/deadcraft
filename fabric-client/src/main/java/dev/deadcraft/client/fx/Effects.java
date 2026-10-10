@@ -69,6 +69,8 @@ public final class Effects {
 		final Driver driver;
 		float time;
 		boolean stopped;
+		/** Lives as long as its driver keeps it (the wand's flames), not just {@link #MAX_LIFE_S}. */
+		boolean persistent;
 
 		Active(FxSystem system, double ox, double oy, double oz, Driver driver) {
 			this.system = system;
@@ -173,6 +175,50 @@ public final class Effects {
 		return at == null ? null : HeroRenderer.boneWorld(at.bone(), at.offset());
 	}
 
+	// ---- the wand's flames ------------------------------------------------------------------------
+
+	private static final String BATON_FLAME = "m_BatonFlameParticle";
+	/** The wand's ends, where its flames burn (Deadlock's weapon_top_fx and weapon_bot_fx). */
+	private static final String[] WAND_ENDS = {"weapon_top_fx", "weapon_bot_fx"};
+	private static final Active[] wandFlames = new Active[WAND_ENDS.length];
+
+	/**
+	 * Keeps the gun's always-on flame burning at each end of the drawn wand while the hero is drawn. Its
+	 * control point 3 is where it burns; it works out 5 and 6 itself from how fast that point moves.
+	 */
+	private static void maintainWand() {
+		FxPack p = HeroRenderer.drawnRecently() ? pack() : null;
+		String weapon = p == null ? null : weaponName();
+		String flame = weapon == null ? null : p.effect(weapon, BATON_FLAME);
+		for (int i = 0; i < WAND_ENDS.length; i++) {
+			Active a = wandFlames[i];
+			boolean alive = a != null && active.contains(a) && !a.stopped;
+			if (flame == null) {
+				if (alive) {
+					a.stopped = true;
+					a.system.stop();
+				}
+				wandFlames[i] = null;
+				continue;
+			}
+			if (alive) continue;
+			Vec3 at = attachmentWorld(WAND_ENDS[i]);
+			if (at == null) continue;
+			String end = WAND_ENDS[i];
+			Active started = play(flame, at, null, (fx, t) -> {
+				Vec3 now = HeroRenderer.drawnRecently() ? attachmentWorld(end) : null;
+				if (now == null) return false;
+				fx.place(0, now, null);
+				fx.place(3, now, null);
+				return true;
+			});
+			if (started != null) {
+				started.persistent = true;
+				wandFlames[i] = started;
+			}
+		}
+	}
+
 	// ---- the gun ---------------------------------------------------------------------------------
 
 	private static final String GUN_TRACER = "m_mapWeaponInfos.primary.m_szBulletTravelTracerParticle",
@@ -231,6 +277,7 @@ public final class Effects {
 	}
 
 	private static void renderUnsafe(LevelRenderContext ctx) {
+		maintainWand();
 		if (active.isEmpty()) {
 			lastNanos = 0;
 			return;
@@ -252,7 +299,7 @@ public final class Effects {
 			}
 			a.system.camera((float) ((eye.x - a.ox) * UNITS_PER_BLOCK), (float) (-(eye.z - a.oz) * UNITS_PER_BLOCK), (float) ((eye.y - a.oy) * UNITS_PER_BLOCK));
 			a.system.update(dt);
-			if (a.time > MAX_LIFE_S || (a.time > 0.05f && a.system.finished())) it.remove();
+			if ((a.time > MAX_LIFE_S && !a.persistent) || (a.time > 0.05f && a.system.finished())) it.remove();
 		}
 		if (active.isEmpty() || pack == null) return;
 

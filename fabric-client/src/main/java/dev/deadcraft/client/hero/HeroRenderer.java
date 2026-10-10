@@ -63,6 +63,11 @@ public final class HeroRenderer {
 
 	private HeroRenderer() {}
 
+	/** The hero was drawn within the last half second. */
+	public static boolean drawnRecently() {
+		return model != null && lastNanos != 0 && System.nanoTime() - lastNanos < 500_000_000L;
+	}
+
 	public static boolean hasBone(String name) {
 		return model != null && model.node(name) >= 0;
 	}

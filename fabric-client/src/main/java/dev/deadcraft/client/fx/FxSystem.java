@@ -191,6 +191,16 @@ public final class FxSystem {
 
 	/** Advances the system (and its children) by a frame. */
 	public void update(float dt) {
+		if (parent == null && dt > 0) {
+			// Control point velocities, from how far each moved this frame (read by speed inputs).
+			for (ControlPoint p : cps) {
+				if (!p.set) continue;
+				for (int k = 0; k < 3; k++) {
+					p.vel[k] = started ? (p.pos[k] - p.prevPos[k]) / dt : 0;
+					p.prevPos[k] = p.pos[k];
+				}
+			}
+		}
 		if (!started) start();
 		float max = def.maxTimeStep;
 		float remaining = Math.min(dt, max * 10);

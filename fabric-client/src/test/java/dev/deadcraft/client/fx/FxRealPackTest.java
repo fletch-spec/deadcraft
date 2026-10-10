@@ -121,6 +121,36 @@ class FxRealPackTest {
 		}
 	}
 
+	/** The wand's flame burns where control point 3 is, streams when it moves, and goes out when stopped. */
+	@Test
+	void wandFlameBurnsAndGoesOut() throws Exception {
+		try (FxPack pack = celeste()) {
+			int[] quads = new int[2];
+			for (int moving = 0; moving < 2; moving++) {
+				FxSystem s = new FxSystem(pack, pack.effect(GUN, "m_BatonFlameParticle"), 5);
+				float x = 100;
+				for (int i = 0; i < 120; i++) {
+					if (moving == 1) x += 300 / 60f;  // a run, about 5 blocks/s
+					for (int cp : new int[] {0, 3}) {
+						s.cp(cp).position(x, 0, 50);
+						s.cp(cp).orient(1, 0, 0, 0, 0, 1);
+					}
+					s.update(1 / 60f);
+				}
+				Count drawn = new Count();
+				Renderers.draw(s, pack, VIEW, drawn);
+				quads[moving] = drawn.quads;
+				assertTrue(drawn.reach < x + 400, "the flame stays near the wand (" + drawn.reach + " units)");
+				s.stop();
+				float t = 0;
+				for (; t < 6 && !s.finished(); t += 1 / 60f) s.update(1 / 60f);
+				assertTrue(s.finished(), "the flame goes out once stopped");
+			}
+			System.out.println("wand flame quads standing and moving: " + quads[0] + ", " + quads[1]);
+			assertTrue(quads[0] > 0 && quads[1] > 0, "the flame draws standing and moving");
+		}
+	}
+
 	/** The impact plays at a hit, facing out of the wall, and ends. */
 	@Test
 	void impactPlaysAndEnds() throws Exception {
