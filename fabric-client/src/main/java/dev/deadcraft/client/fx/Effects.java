@@ -222,6 +222,104 @@ public final class Effects {
 		}
 	}
 
+	// ---- abilities -------------------------------------------------------------------------------
+
+	/** A control point of a cast: a model attachment, or a point in the caster's aim frame (Source units). */
+	private record Point(int cp, String attachment, float x, float y, float z) {
+		static Point at(int cp, String attachment) {
+			return new Point(cp, attachment, 0, 0, 0);
+		}
+
+		static Point local(int cp, float x, float y, float z) {
+			return new Point(cp, null, x, y, z);
+		}
+	}
+
+	/**
+	 * Where each ability's effect puts its control points, from the effect's own preview setup in Deadlock
+	 * (the caster at the origin facing +x): the game sets them in code, which we can't read. Keyed by
+	 * "ability effect-key".
+	 */
+	private static final Map<String, Point[]> CASTS = Map.of(
+		// Radiant Blast: a cone 779 units long, its edges at +-551; the head, and the cast point at the chest.
+		"ability_unicorn_radiantblast m_CastParticle", new Point[] {Point.local(0, 0, 0, 0), Point.local(1, 779, 551, 0),
+			Point.local(2, 779, -551, 0), Point.at(3, "head_fx"), Point.local(4, 793, 0, 137), Point.local(5, 30, 0, 76.5f),
+			Point.local(10, 779, 0, 0), Point.local(15, 779, 0, -100)},
+		// Prismatic Guard: from the horn towards a point 500 units ahead.
+		"ability_unicorn_prismaticguard m_CastParticle", new Point[] {Point.at(0, "horn_tip_fx"), Point.local(1, 500, 0, 0),
+			Point.local(10, 15.6f, 0, 100.5f), Point.at(4, "horn_base_fx"), Point.local(6, 0, 0, 0)},
+		// Luminous Strike: from the horn to the sky above where it lands.
+		"ability_unicorn_luminousstrike m_FluxStrikeCast", new Point[] {Point.local(0, 0, 0, 0), Point.at(2, "horn_base_fx"),
+			Point.local(5, 531, -174, 916), Point.local(6, 0, 0, 0)});
+	/** The orb's charge, held while channelling: the horn tip and both ends of the wand. */
+	private static final Point[] ORB_CHARGE = {Point.local(0, 0, 0, 0), Point.at(1, "horn_tip_fx"), Point.at(2, "weapon_top_fx"),
+		Point.at(3, "weapon_bot_fx"), Point.local(6, 0, 0, 0)};
+	private static final String[][] CAST_KEYS = {{"ability_unicorn_radiantblast", "m_CastParticle"},
+		{"ability_unicorn_prismaticguard", "m_CastParticle"}, {"ability_unicorn_luminousstrike", "m_FluxStrikeCast"}};
+	private static Active orbCharge;
+	private static int abilityLogs;
+
+	/** An ability's event (Deadlock's cast): plays its cast effect from the hero, facing where they aim. */
+	public static void ability(String name) {
+		FxPack p = broken ? null : pack();
+		if (p == null) return;
+		for (String[] k : CAST_KEYS) {
+			if (!k[0].equals(name)) continue;
+			String path = p.effect(k[0], k[1]);
+			Point[] points = CASTS.get(k[0] + " " + k[1]);
+			Active a = playAt(path, points, null);
+			if (abilityLogs++ < 10) FxPack.LOG.info("Deadcraft: ability {}: cast effect {} {}", name, path, a != null ? "played" : "unavailable");
+		}
+	}
+
+	/** Holds the orb's charge effect while the hero channels (Dazzling Orb), and lets it go when they stop. */
+	public static void channeling(boolean on) {
+		if (broken) return;
+		boolean alive = orbCharge != null && (active.contains(orbCharge) || starting.contains(orbCharge)) && !orbCharge.stopped;
+		if (on && !alive) {
+			FxPack p = pack();
+			if (p == null) return;
+			orbCharge = playAt(p.effect("ability_unicorn_dazzlingorb", "m_ChargeParticle"), ORB_CHARGE, () -> orbChanneling);
+			if (orbCharge != null) orbCharge.persistent = true;
+		}
+		orbChanneling = on;
+	}
+
+	private static boolean orbChanneling;
+
+	/** Plays an effect with its control points on the hero (following the model each frame) and in their aim frame. */
+	private static Active playAt(String path, Point[] points, java.util.function.BooleanSupplier keep) {
+		Vec3 feet = heroFeet();
+		if (path == null || points == null || feet == null) return null;
+		Vec3[] frame = aimFrame();
+		return play(path, feet, frame[0], (a, t) -> {
+			Vec3 f = heroFeet();
+			Vec3[] fr = aimFrame();
+			if (f == null) return false;
+			for (Point pt : points) {
+				Vec3 at = pt.attachment() != null ? attachmentWorld(pt.attachment()) : null;
+				if (at == null) at = f.add(fr[0].scale(pt.x() / UNITS_PER_BLOCK)).add(fr[1].scale(pt.y() / UNITS_PER_BLOCK)).add(fr[2].scale(pt.z() / UNITS_PER_BLOCK));
+				a.place(pt.cp(), at, fr[0]);
+			}
+			return keep == null ? t < 3 : keep.getAsBoolean();
+		});
+	}
+
+	private static Vec3 heroFeet() {
+		var player = Minecraft.getInstance().player;
+		return player == null ? null : player.position();
+	}
+
+	/** Forward (the camera's horizontal look), left and up, in Minecraft's world. */
+	private static Vec3[] aimFrame() {
+		var f = Minecraft.getInstance().gameRenderer.mainCamera().forwardVector();
+		Vec3 forward = new Vec3(f.x(), 0, f.z());
+		forward = forward.lengthSqr() < 1e-6 ? new Vec3(0, 0, 1) : forward.normalize();
+		Vec3 up = new Vec3(0, 1, 0);
+		Vec3 left = up.cross(forward);
+		return new Vec3[] {forward, left, up};
+	}
+
 	// ---- the gun ---------------------------------------------------------------------------------
 
 	private static final String GUN_TRACER = "m_mapWeaponInfos.primary.m_szBulletTravelTracerParticle",
@@ -315,13 +413,13 @@ public final class Effects {
 		for (Active a : active) {
 			float[] eyeSrc = {(float) ((eye.x - a.ox) * UNITS_PER_BLOCK), (float) (-(eye.z - a.oz) * UNITS_PER_BLOCK), (float) ((eye.y - a.oy) * UNITS_PER_BLOCK)};
 			float bx = (float) (a.ox - eye.x), by = (float) (a.oy - eye.y), bz = (float) (a.oz - eye.z);
-			Renderers.draw(a.system, pack, new Renderers.View(eyeSrc, right, upSrc), (texture, add, xyz, uv, argb) -> {
+			Renderers.draw(a.system, pack, new Renderers.View(eyeSrc, right, upSrc), (texture, add, xyz, uv, argb, bright) -> {
 				String key = (add ? "+" : "~") + texture;
 				Bucket b = buckets.computeIfAbsent(key, k -> new Bucket(texture, add));
 				for (int i = 0; i < 4; i++) {
 					// Source (x, y, z) to Minecraft (x, z, -y), in blocks, relative to the camera.
 					b.add(bx + xyz[i * 3] / UNITS_PER_BLOCK, by + xyz[i * 3 + 2] / UNITS_PER_BLOCK, bz - xyz[i * 3 + 1] / UNITS_PER_BLOCK,
-						uv[i * 2], uv[i * 2 + 1], argb[i]);
+						uv[i * 2], uv[i * 2 + 1], argb[i], bright);
 				}
 			});
 		}
@@ -339,7 +437,8 @@ public final class Effects {
 					int o = i * 5;
 					float x = d[o], y = d[o + 1], z = d[o + 2];
 					consumer.addVertex(m.m00() * x + m.m10() * y + m.m20() * z + m.m30(), m.m01() * x + m.m11() * y + m.m21() * z + m.m31(),
-						m.m02() * x + m.m12() * y + m.m22() * z + m.m32()).setUv(d[o + 3], d[o + 4]).setColor(c[i]);
+						m.m02() * x + m.m12() * y + m.m22() * z + m.m32()).setUv(d[o + 3], d[o + 4]).setColor(c[i])
+						.setNormal(Math.min(1, b.bright[i] / MAX_BRIGHTNESS), 0, 0);
 				}
 			});
 		}
@@ -353,6 +452,7 @@ public final class Effects {
 		final boolean additive;
 		float[] data = new float[5 * 64];
 		int[] colors = new int[64];
+		float[] bright = new float[64];
 		int count;
 
 		Bucket(String texture, boolean additive) {
@@ -360,10 +460,11 @@ public final class Effects {
 			this.additive = additive;
 		}
 
-		void add(float x, float y, float z, float u, float v, int argb) {
+		void add(float x, float y, float z, float u, float v, int argb, float brightness) {
 			if (count + 1 > colors.length) {
 				data = java.util.Arrays.copyOf(data, data.length * 2);
 				colors = java.util.Arrays.copyOf(colors, colors.length * 2);
+				bright = java.util.Arrays.copyOf(bright, bright.length * 2);
 			}
 			int o = count * 5;
 			data[o] = x;
@@ -372,26 +473,33 @@ public final class Effects {
 			data[o + 3] = u;
 			data[o + 4] = v;
 			colors[count] = argb;
+			bright[count] = brightness;
 			count++;
 		}
 	}
 
 	// ---- render types ----------------------------------------------------------------------------
 
+	/** Brightness travels to the shader in the normal's x as a fraction of this (fx.vsh). */
+	private static final float MAX_BRIGHTNESS = 32;
+
 	private static RenderPipeline pipeline(boolean add) {
 		if (add && additive != null) return additive;
 		if (!add && blended != null) return blended;
-		RenderPipeline p = RenderPipeline.builder()
+		RenderPipeline.Builder builder = RenderPipeline.builder();
+		if (add) builder = builder.withShaderDefine("ADDITIVE");
+		RenderPipeline p = builder
 			.withBindGroupLayout(BindGroupLayouts.GLOBALS)
 			.withBindGroupLayout(BindGroupLayouts.PROJECTION)
 			.withBindGroupLayout(BindGroupLayouts.DYNAMIC_TRANSFORMS)
 			.withLocation(Identifier.fromNamespaceAndPath("deadcraft", add ? "pipeline/fx_additive" : "pipeline/fx_blended"))
-			.withVertexShader("core/position_tex_color")
-			.withFragmentShader("core/position_tex_color")
+			// Deadlock's spritecard colour per pixel: brightness after the texture, rolled off keeping the hue.
+			.withVertexShader(Identifier.fromNamespaceAndPath("deadcraft", "core/fx"))
+			.withFragmentShader(Identifier.fromNamespaceAndPath("deadcraft", "core/fx"))
 			.withBindGroupLayout(BindGroupLayouts.SAMPLER0)
 			// Additive: source times its alpha, added (Deadlock's additive cards); else ordinary alpha blending.
 			.withColorTargetState(new ColorTargetState(add ? BlendFunction.LIGHTNING : BlendFunction.TRANSLUCENT))
-			.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
+			.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR_NORMAL)
 			.withPrimitiveTopology(PrimitiveTopology.QUADS)
 			// Hidden behind blocks, but not hiding what's behind it.
 			.withDepthStencilState(new DepthStencilState(CompareOp.LESS_THAN_OR_EQUAL, false))

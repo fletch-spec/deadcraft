@@ -32,7 +32,7 @@ class FxRealPackTest {
 		final Set<String> textures = new HashSet<>();
 
 		@Override
-		public void quad(String texture, boolean add, float[] xyz, float[] uv, int[] argb) {
+		public void quad(String texture, boolean add, float[] xyz, float[] uv, int[] argb, float brightness) {
 			quads++;
 			if (add) additive++;
 			if (texture != null) textures.add(texture);

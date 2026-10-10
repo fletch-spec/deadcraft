@@ -159,6 +159,7 @@ public final class Follow {
 			double yawRad = Math.toRadians(player.yBodyRot);
 			double fx = -Math.sin(yawRad), fz = Math.cos(yawRad);  // Minecraft facing at this yaw
 			double forward = hv.x() * fx + hv.z() * fz, right = -(hv.x() * fz - hv.z() * fx);
+			Effects.channeling((hero.flags & HeroFlags.CHANNELING) != 0);
 			HeroRenderer.setInput(new HeroAnimator.Input(forward, right, hv.y(), (hero.flags & HeroFlags.ON_GROUND) != 0,
 				(float) (hero.eyePosition.z() - hero.position.z()), hero.hullHeight, wallBeside(mc, player, fx, fz),
 				hero.cameraAngles.x(), hero.buttons, (hero.flags & HeroFlags.CHANNELING) != 0, hero.abilitiesReady,
@@ -300,6 +301,7 @@ public final class Follow {
 					meleeAt = System.nanoTime();
 				}
 				HeroRenderer.ability(e.abilityName, e.abilityName.contains("mantle") ? ledgeAhead() : Double.NaN);
+				Effects.ability(e.abilityName);
 				if (e.abilityName.toLowerCase().contains("dash")) DeadlockCamera.dashKick();
 			});
 		}
@@ -312,7 +314,7 @@ public final class Follow {
 	private static net.minecraft.world.phys.Vec3 fireCamera, fireLook;
 	private static float fireYawDiff, firePitchDiff;
 	private static double crosshairSum, crosshairMax;
-	private static int crosshairCount, shotsFired;
+	private static int crosshairCount, shotsFired, abilityShotLogs;
 
 	/**
 	 * New entries in the plugin's shot ring. The server tells the shooter only where each bullet started
@@ -362,6 +364,15 @@ public final class Follow {
 		double pitch = Math.toRadians(shot.direction.x()), yaw = Math.toRadians(shot.direction.y());
 		var dir = new net.minecraft.world.phys.Vec3(Math.cos(pitch) * Math.cos(yaw), -Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
 		var from = toWorld(Proto.toMinecraft(shot.origin));
+		if (!gun && abilityShotLogs++ < 12) {
+			// Where ability bullets (Radiant Blast's cone) leave from and head, against the camera.
+			var f = camera.forwardVector();
+			double cos = dir.x * f.x() + dir.y * f.y() + dir.z * f.z();
+			LOG.info("Deadcraft: ability bullet: {} deg from the camera's look, from {} blocks off the camera ({} ahead); pitch {} yaw {}",
+				String.format("%.1f", Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, cos))))), String.format("%.2f", from.distanceTo(camera.position())),
+				String.format("%.2f", from.subtract(camera.position()).dot(new net.minecraft.world.phys.Vec3(f.x(), f.y(), f.z()))),
+				String.format("%.1f", shot.direction.x()), String.format("%.1f", shot.direction.y()));
+		}
 		if (gun && lastState != null && (lastState.flags & HeroFlags.ON_GROUND) != 0
 			&& Math.abs(lastState.velocity.x()) + Math.abs(lastState.velocity.y()) + Math.abs(lastState.velocity.z()) < 20) {
 			// Where the shot's line passes the camera's ray, in the camera's right and up: the camera moves onto it.

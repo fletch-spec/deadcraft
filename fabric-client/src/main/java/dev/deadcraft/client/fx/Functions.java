@@ -141,6 +141,9 @@ final class Functions {
 			case "C_INIT_NormalAlignToCP" -> new NormalAlignToCP(m, c);
 			case "C_INIT_VelocityRandom" -> new VelocityRandom(m, c);
 			case "C_INIT_CreateWithinBox" -> new CreateWithinBox(m, c);
+			case "C_INIT_CreateSequentialPathV2", "C_INIT_CreateSequentialPath" -> new CreateSequentialPath(m, c);
+			case "C_INIT_CreateFromParentParticles" -> new CreateFromParentParticles(m, c);
+			case "C_INIT_InheritVelocity" -> new InheritVelocity(m, c);
 			default -> null;
 		};
 	}
@@ -166,6 +169,7 @@ final class Functions {
 			case "C_OP_EndCapDecay" -> new EndCapDecay(m, c);
 			case "C_OP_AlphaDecay" -> new AlphaDecay(m, c);
 			case "C_OP_DistanceToTransform" -> new DistanceToTransform(m, c);
+			case "C_OP_MaintainSequentialPath" -> new MaintainSequentialPath(m, c);
 			// Orientation bookkeeping with no visible effect on camera-facing sprites: accepted, not run.
 			case "C_OP_NormalLock", "C_OP_RemapTransformOrientationToRotations", "C_OP_RemapTransformOrientationToYaw" -> new NoOp(m, c);
 			default -> null;
@@ -176,6 +180,7 @@ final class Functions {
 		return switch (cls) {
 			case "C_OP_SetControlPointToVectorExpression" -> new SetControlPointToVectorExpression(m, c);
 			case "C_OP_RemapSpeedtoCP" -> new RemapSpeedtoCP(m, c);
+			case "C_OP_SetSingleControlPointPosition" -> new SetSingleControlPointPosition(m, c);
 			default -> null;
 		};
 	}
@@ -191,7 +196,8 @@ final class Functions {
 	/** Accepts classes that have nothing to draw here, so they aren't reported as missing. */
 	static boolean ignored(String cls) {
 		return switch (cls) {
-			case "C_INIT_RemapTransformOrientationToRotations", "C_INIT_InheritFromParentParticles" -> true;
+			case "C_INIT_RemapTransformOrientationToRotations", "C_INIT_InheritFromParentParticles",
+				"C_INIT_RemapInitialTransformDirectionToRotation" -> true;
 			default -> false;
 		};
 	}
@@ -766,6 +772,239 @@ final class Functions {
 		}
 	}
 
+	/** A path between two control points (a quadratic curve through a mid point), as path functions use. */
+	static final class PathParams {
+		final int start, mid, end, bulgeControl;
+		final float bulge, midPoint;
+		final float[] startOffset, midOffset, endOffset;
+
+		PathParams(Map<String, Object> m) {
+			Map<String, Object> p = Kv3.map(m, "m_PathParams");
+			start = Kv3.i(p, "m_nStartControlPointNumber", 0);
+			mid = Kv3.i(p, "m_nMidControlPointNumber", -1);
+			end = Kv3.i(p, "m_nEndControlPointNumber", 0);
+			bulgeControl = Kv3.i(p, "m_nBulgeControl", 0);
+			bulge = Kv3.f(p, "m_flBulge", 0);
+			midPoint = Kv3.f(p, "m_flMidPoint", 0.5f);
+			startOffset = Kv3.vec(p, "m_vStartPointOffset", 0, 0, 0);
+			midOffset = Kv3.vec(p, "m_vMidPointOffset", 0, 0, 0);
+			endOffset = Kv3.vec(p, "m_vEndOffset", 0, 0, 0);
+		}
+
+		/** Start, mid and end (9 floats) for a path from control point a to b. */
+		float[] values(FxSystem sys, int a, int b) {
+			float[] s = sys.cp(a).pos, e = sys.cp(b).pos, out = new float[9];
+			for (int k = 0; k < 3; k++) {
+				out[k] = s[k] + startOffset[k];
+				out[6 + k] = e[k] + endOffset[k];
+			}
+			if (mid > -1) {
+				float[] through = sys.cp(mid).pos;
+				for (int k = 0; k < 3; k++) out[3 + k] = 2 * through[k] - 0.5f * (out[k] + out[6 + k]) + midOffset[k];
+				return out;
+			}
+			for (int k = 0; k < 3; k++) out[3 + k] = out[k] + (out[6 + k] - out[k]) * midPoint;
+			if (bulgeControl != 0) {
+				ControlPoint cp = sys.cp(bulgeControl == 2 ? b : a);
+				float dx = out[6] - out[0], dy = out[7] - out[1], dz = out[8] - out[2];
+				float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+				float perp = len > 1e-4f ? 1 - Math.abs((dx * cp.fwd[0] + dy * cp.fwd[1] + dz * cp.fwd[2]) / len) : 0;
+				for (int k = 0; k < 3; k++) out[3 + k] += cp.fwd[k] * len * bulge * perp;
+			} else if (bulge != 0) {
+				for (int k = 0; k < 3; k++) out[3 + k] += (sys.random(k, 7919) * 2 - 1) * bulge;
+			}
+			for (int k = 0; k < 3; k++) out[3 + k] += midOffset[k];
+			return out;
+		}
+
+		static void evaluate(float[] v, float t, float[] out) {
+			for (int k = 0; k < 3; k++) {
+				float a = v[k] + (v[3 + k] - v[k]) * t, b = v[3 + k] + (v[6 + k] - v[3 + k]) * t;
+				out[k] = a + (b - a) * t;
+			}
+		}
+	}
+
+	/** Particles placed one after another along a path between control points (beams, streaks along a cone). */
+	static final class CreateSequentialPath extends Initializer {
+		private final FloatInput maxDistance, numToAssign;
+		private final boolean loop, cpPairs;
+		private final PathParams path;
+		private final int span, direction;
+		private float parameter, step;
+		private float cached = Float.NaN;
+		private final float[] at = new float[3];
+
+		CreateSequentialPath(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			maxDistance = Inputs.floatInput(m.get("m_fMaxDistance"), 0, c);
+			numToAssign = Inputs.floatInput(m.get("m_flNumToAssign"), 100, c);
+			loop = Kv3.b(m, "m_bLoop", true);
+			path = new PathParams(m);
+			direction = path.end >= path.start ? 1 : -1;
+			int s = Math.abs(path.end - path.start);
+			boolean pairs = Kv3.b(m, "m_bCPPairs", false) && s > 1;
+			cpPairs = pairs;
+			span = pairs ? s : 1;
+		}
+
+		@Override
+		void reset() {
+			parameter = 0;
+			step = 0;
+			cached = Float.NaN;
+		}
+
+		@Override
+		void init(Particle p, FxSystem sys) {
+			float n = numToAssign.get(null, sys);
+			if (n != cached) {
+				cached = n;
+				step = n > 1 ? 1 / (n - 1) : 0;
+				if (cpPairs) step *= span;
+			}
+			float t = parameter;
+			int a = path.start, b = path.end;
+			if (cpPairs) {
+				a = path.start + (int) t * direction;
+				b = a + direction;
+				t -= (int) t;
+				if (direction * (direction + a - path.end) >= 1) {
+					b = path.end;
+					a = path.end - direction;
+					t = 1;
+				}
+			}
+			PathParams.evaluate(path.values(sys, a, b), t, at);
+			float j = maxDistance.get(p, sys);
+			for (int k = 0; k < 3; k++) {
+				p.pos[k] = at[k] + (sys.rng() * 2 - 1) * j;
+				p.prev[k] = p.pos[k];
+			}
+			float before = parameter;
+			parameter += step;
+			if (step > 0 && Math.abs(parameter - span) < 1e-5f) parameter = span;
+			if (parameter > span || parameter < 0) {
+				float wrapped = step <= 0 ? -parameter : parameter - span;
+				if (loop) {
+					parameter = before == span ? 0 : wrapped;
+				} else {
+					if (step >= 0) wrapped = span - wrapped;
+					parameter = wrapped;
+					step = -step;
+				}
+			}
+		}
+	}
+
+	/** Keeps the particles spread along a path between control points as they move. */
+	static final class MaintainSequentialPath extends Operator {
+		private final FloatInput maxDistance, numToAssign, cohesion;
+		private final boolean loop, useCount;
+		private final PathParams path;
+		private final float[] at = new float[3];
+
+		MaintainSequentialPath(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			maxDistance = Inputs.floatInput(m.get("m_fMaxDistance"), 0, c);
+			numToAssign = Inputs.floatInput(m.get("m_flNumToAssign"), 100, c);
+			cohesion = Inputs.floatInput(m.get("m_flCohesionStrength"), 1, c);
+			loop = Kv3.b(m, "m_bLoop", true);
+			useCount = Kv3.b(m, "m_bUseParticleCount", false);
+			path = new PathParams(m);
+		}
+
+		@Override
+		void operate(FxSystem sys, float dt, float strength) {
+			float n = useCount ? sys.particles.size() : numToAssign.get(null, sys);
+			float step = n <= 1 ? 0 : 1 / (n - 1);
+			float max = maxDistance.get(null, sys), keep = 1 - cohesion.get(null, sys);
+			float[] v = path.values(sys, path.start, path.end);
+			int slot = 0, dir = 1;
+			for (Particle p : sys.particles) {
+				if (slot >= n || slot < 0) {
+					if (loop) {
+						slot = 0;
+					} else {
+						dir = -dir;
+						slot = Math.max(Math.min(slot, (int) n - 1), 1);
+					}
+				}
+				PathParams.evaluate(v, slot * step, at);
+				pull(p.pos, at, max, keep);
+				pull(p.prev, at, max, keep);
+				slot += dir;
+			}
+		}
+
+		private static void pull(float[] pos, float[] target, float max, float keep) {
+			float dx = pos[0] - target[0], dy = pos[1] - target[1], dz = pos[2] - target[2];
+			float d = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+			if (d <= 0) {
+				System.arraycopy(target, 0, pos, 0, 3);
+				return;
+			}
+			float s = Math.min(d, max) * keep / d;
+			pos[0] = target[0] + dx * s;
+			pos[1] = target[1] + dy * s;
+			pos[2] = target[2] + dz * s;
+		}
+	}
+
+	/** Children's particles born where the parent system's particles are. */
+	static final class CreateFromParentParticles extends Initializer {
+		private final float velocityScale, increment;
+		private final boolean random;
+		private float index;
+
+		CreateFromParentParticles(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			velocityScale = Kv3.f(m, "m_flVelocityScale", 0);
+			increment = Kv3.f(m, "m_flIncrement", 1);
+			random = Kv3.b(m, "m_bRandomDistribution", false);
+		}
+
+		@Override
+		void reset() {
+			index = 0;
+		}
+
+		@Override
+		void init(Particle p, FxSystem sys) {
+			if (sys.parent == null) return;
+			List<Particle> parents = sys.parent.particles;
+			if (parents.isEmpty()) {
+				p.lifetime = 0;
+				return;
+			}
+			int last = parents.size() - 1;
+			if (random) index = (int) (sys.rng() * (last + 1));
+			else if (index > last) index = 0;
+			Particle parent = parents.get(Math.max(0, Math.min(last, (int) index)));
+			index += increment;
+			System.arraycopy(parent.pos, 0, p.pos, 0, 3);
+			for (int k = 0; k < 3; k++) p.vel[k] = parent.vel[k] * velocityScale;
+		}
+	}
+
+	/** Starts particles with their control point's velocity. */
+	static final class InheritVelocity extends Initializer {
+		private final int cp;
+		private final float scale;
+
+		InheritVelocity(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			cp = Kv3.i(m, "m_nControlPointNumber", 0);
+			scale = Kv3.f(m, "m_flVelocityScale", 1);
+		}
+
+		@Override
+		void init(Particle p, FxSystem sys) {
+			float[] v = sys.cp(cp).vel;
+			for (int k = 0; k < 3; k++) p.vel[k] += v[k] * scale;
+		}
+	}
+
 	// ---- operators -------------------------------------------------------------------------------
 
 	static final class NoOp extends Operator {
@@ -1314,6 +1553,34 @@ final class Functions {
 				r[2] = a[0] * b[1] - a[1] * b[0];
 			}
 			sys.setCpValue(out, r);
+		}
+	}
+
+	/** Puts a control point at an offset in another one's frame. */
+	static final class SetSingleControlPointPosition extends PreEmission {
+		private final int out;
+		private final VecInput pos;
+		private final boolean once;
+		private final Transform transform;
+		private boolean done;
+		private final float[] v = new float[3];
+
+		SetSingleControlPointPosition(Map<String, Object> m, Compiler c) {
+			super(m, c);
+			out = Kv3.i(m, "m_nCP1", 1);
+			pos = Inputs.vecInput(m.get("m_vecCP1Pos"), 128, 0, 0, c);
+			once = Kv3.b(m, "m_bSetOnce", false);
+			transform = Transform.parse(m.get("m_transformInput"), 0);
+		}
+
+		@Override
+		void operate(FxSystem sys, float dt) {
+			if (once && done) return;
+			pos.get(null, sys, v);
+			ControlPoint t = transform.get(sys);
+			t.toWorld(v[0], v[1], v[2], v);
+			sys.cp(out).position(t.pos[0] + v[0], t.pos[1] + v[1], t.pos[2] + v[2]);
+			done = true;
 		}
 	}
 

@@ -50,7 +50,7 @@ final class FxPreview implements Renderers.Sink {
 	}
 
 	@Override
-	public void quad(String texture, boolean additive, float[] xyz, float[] uv, int[] argb) {
+	public void quad(String texture, boolean additive, float[] xyz, float[] uv, int[] argb, float brightness) {
 		quads++;
 		float[] sx = new float[4], sy = new float[4];
 		for (int i = 0; i < 4; i++) {
@@ -59,11 +59,12 @@ final class FxPreview implements Renderers.Sink {
 			sy[i] = height / 2f - (dx * view.up()[0] + dy * view.up()[1] + dz * view.up()[2]) * pixelsPerUnit;
 		}
 		BufferedImage tex = texture(texture);
-		triangle(tex, additive, sx, sy, uv, argb, 0, 1, 2);
-		triangle(tex, additive, sx, sy, uv, argb, 0, 2, 3);
+		triangle(tex, additive, sx, sy, uv, argb, brightness, 0, 1, 2);
+		triangle(tex, additive, sx, sy, uv, argb, brightness, 0, 2, 3);
 	}
 
-	private void triangle(BufferedImage tex, boolean additive, float[] sx, float[] sy, float[] uv, int[] argb, int a, int b, int c) {
+	/** As fx.fsh: linear texture x colour x brightness, rolled off, in sRGB; additive adds, else blends. */
+	private void triangle(BufferedImage tex, boolean additive, float[] sx, float[] sy, float[] uv, int[] argb, float bright, int a, int b, int c) {
 		int minX = (int) Math.max(0, Math.floor(Math.min(sx[a], Math.min(sx[b], sx[c]))));
 		int maxX = (int) Math.min(width - 1, Math.ceil(Math.max(sx[a], Math.max(sx[b], sx[c]))));
 		int minY = (int) Math.max(0, Math.floor(Math.min(sy[a], Math.min(sy[b], sy[c]))));
@@ -99,14 +100,18 @@ final class FxPreview implements Renderers.Sink {
 				}
 				float alpha = ta * ca;
 				int o = (y * width + x) * 3;
+				float[] lin = {(float) Math.pow(tr, 2.2) * cr * bright, (float) Math.pow(tg, 2.2) * cg * bright, (float) Math.pow(tb, 2.2) * cb * bright};
+				if (additive) for (int k = 0; k < 3; k++) lin[k] *= alpha;
+				int out = Renderers.tonemap(lin);
+				float or = (out >> 16 & 255) / 255f, og = (out >> 8 & 255) / 255f, ob = (out & 255) / 255f;
 				if (additive) {
-					rgb[o] += tr * cr * alpha;
-					rgb[o + 1] += tg * cg * alpha;
-					rgb[o + 2] += tb * cb * alpha;
+					rgb[o] += or;
+					rgb[o + 1] += og;
+					rgb[o + 2] += ob;
 				} else {
-					rgb[o] += (tr * cr - rgb[o]) * alpha;
-					rgb[o + 1] += (tg * cg - rgb[o + 1]) * alpha;
-					rgb[o + 2] += (tb * cb - rgb[o + 2]) * alpha;
+					rgb[o] += (or - rgb[o]) * alpha;
+					rgb[o + 1] += (og - rgb[o + 1]) * alpha;
+					rgb[o + 2] += (ob - rgb[o + 2]) * alpha;
 				}
 			}
 		}

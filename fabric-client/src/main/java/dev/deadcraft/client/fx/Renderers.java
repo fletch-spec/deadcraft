@@ -21,10 +21,11 @@ public final class Renderers {
 	/** Where the quads go: Minecraft's buffer in game, a counter in tests. Coordinates are the effect's frame. */
 	public interface Sink {
 		/**
-		 * One quad: four corners (x, y, z each, in order round the quad), their texture coordinates (u, v each)
-		 * and ARGB colours.
+		 * One quad: four corners (x, y, z each, in order round the quad), their texture coordinates (u, v each),
+		 * their colours (ARGB, the colour in linear light) and the card's brightness (Deadlock's overbright,
+		 * self-illumination and add-self, applied per pixel after the texture, as Deadlock does).
 		 */
-		void quad(String texture, boolean additive, float[] xyz, float[] uv, int[] argb);
+		void quad(String texture, boolean additive, float[] xyz, float[] uv, int[] argb, float brightness);
 	}
 
 	/** The camera, in the effect's frame: its position and its right and up directions. */
@@ -73,16 +74,22 @@ public final class Renderers {
 
 		abstract void draw(FxSystem sys, FxPack pack, View view, Sink sink);
 
-		/** A particle's drawn colour (ARGB), with Deadlock's brightening rolled off into Minecraft's range. */
-		int color(Particle p, FxSystem sys, float alphaMul, float colorMul) {
+		/** A particle's colour (ARGB: the colour in linear light, and its alpha), before brightening. */
+		int color(Particle p, FxSystem sys, float alphaMul) {
 			colorScale.get(p, sys, tmp);
-			float bright = overbright.get(p, sys) * (1 + addSelf.get(p, sys)) * (selfIllum.get(p, sys) + diffuse.get(p, sys) * AMBIENT) * colorMul;
 			float a = Inputs.clamp01(p.alpha * alphaScale.get(p, sys) * alphaMul);
+			int argb = (int) (a * 255 + 0.5f) << 24;
 			for (int k = 0; k < 3; k++) {
 				float c = p.color[k] * tmp[k];
-				tmp[k] = (gamma ? toLinear(Inputs.clamp01(c)) : Math.max(0, c)) * bright;
+				float lin = gamma ? toLinear(Inputs.clamp01(c)) : Inputs.clamp01(c);
+				argb |= (int) (lin * 255 + 0.5f) << (16 - 8 * k);
 			}
-			return ((int) (a * 255 + 0.5f) << 24) | tonemap(tmp);
+			return argb;
+		}
+
+		/** How much brighter than its colour the card draws (overbright x (1 + add-self) x lighting). */
+		float brightness(Particle p, FxSystem sys) {
+			return overbright.get(p, sys) * (1 + addSelf.get(p, sys)) * (selfIllum.get(p, sys) + diffuse.get(p, sys) * AMBIENT);
 		}
 
 		/** The sprite sheet frame for a particle: u0, v0, u1, v1. */
@@ -128,7 +135,7 @@ public final class Renderers {
 		if (m > KNEE) {
 			float rolled = KNEE + (1 - KNEE) * (1 - (float) Math.exp(-(m - KNEE) / (1 - KNEE)));
 			float k = rolled / m;
-			float white = Inputs.clamp01((m - 1) / (m + 4)) * 0.6f;
+			float white = Inputs.clamp01((m - 1) / (m + 4)) * 0.25f;
 			r = r * k + (rolled - r * k) * white;
 			g = g * k + (rolled - g * k) * white;
 			b = b * k + (rolled - b * k) * white;
@@ -187,7 +194,7 @@ public final class Renderers {
 			for (Particle p : sys.particles) {
 				float r = p.radius * radiusScale.get(p, sys);
 				if (r <= 0) continue;
-				int col = color(p, sys, 1, 1);
+				int col = color(p, sys, 1);
 				if ((col >>> 24) == 0) continue;
 				// The card's axes.
 				switch (orientation) {
@@ -227,7 +234,7 @@ public final class Renderers {
 				uv[6] = rect[0];
 				uv[7] = rect[1];
 				argb[0] = argb[1] = argb[2] = argb[3] = col;
-				sink.quad(texture, additive, xyz, uv, argb);
+				sink.quad(texture, additive, xyz, uv, argb, brightness(p, sys));
 			}
 		}
 
@@ -296,10 +303,10 @@ public final class Renderers {
 				uv[5] = rect[3];
 				uv[6] = rect[0];
 				uv[7] = rect[3];
-				int head = color(p, sys, headAlpha.get(p, sys), 1), tail = color(p, sys, tailAlpha.get(p, sys), 1);
+				int head = color(p, sys, headAlpha.get(p, sys)), tail = color(p, sys, tailAlpha.get(p, sys));
 				argb[0] = argb[1] = head;
 				argb[2] = argb[3] = tail;
-				sink.quad(texture, additive, xyz, uv, argb);
+				sink.quad(texture, additive, xyz, uv, argb, brightness(p, sys));
 			}
 		}
 
@@ -359,9 +366,9 @@ public final class Renderers {
 				uv[5] = v1;
 				uv[6] = 0;
 				uv[7] = v1;
-				argb[0] = argb[1] = color(p0, sys, 1, 1);
-				argb[2] = argb[3] = color(p1, sys, 1, 1);
-				if (((argb[0] | argb[2]) >>> 24) != 0) sink.quad(texture, additive, xyz, uv, argb);
+				argb[0] = argb[1] = color(p0, sys, 1);
+				argb[2] = argb[3] = color(p1, sys, 1);
+				if (((argb[0] | argb[2]) >>> 24) != 0) sink.quad(texture, additive, xyz, uv, argb, (brightness(p0, sys) + brightness(p1, sys)) / 2);
 				v = v1;
 				System.arraycopy(side, 0, prevSide, 0, 3);
 			}

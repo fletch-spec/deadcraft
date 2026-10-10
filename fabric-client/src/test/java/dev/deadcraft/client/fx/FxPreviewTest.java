@@ -10,12 +10,20 @@ import org.junit.jupiter.api.Test;
 class FxPreviewTest {
 	private static final Path OUT = Path.of("build", "fx-preview");
 	private static final Renderers.View SIDE = new Renderers.View(new float[] {-2000, 0, 0}, new float[] {0, -1, 0}, new float[] {0, 0, 1});
+	/** From above, +x up the image. */
+	private static final Renderers.View TOP = new Renderers.View(new float[] {0, 0, 3000}, new float[] {0, -1, 0}, new float[] {1, 0, 0});
+	/** From the side: +x to the right. */
+	private static final Renderers.View FRONT = new Renderers.View(new float[] {0, -2000, 0}, new float[] {1, 0, 0}, new float[] {0, 0, 1});
 
 	interface Setup {
 		void at(FxSystem s, float t);
 	}
 
 	static void strip(FxPack pack, String path, String name, float[] times, float unitsAcross, Setup setup, float stopAt) throws Exception {
+		strip(pack, path, name, times, unitsAcross, setup, stopAt, SIDE);
+	}
+
+	static void strip(FxPack pack, String path, String name, float[] times, float unitsAcross, Setup setup, float stopAt, Renderers.View view) throws Exception {
 		if (path == null) return;
 		FxSystem s = new FxSystem(pack, path, 42);
 		FxPreview[] frames = new FxPreview[times.length];
@@ -31,10 +39,10 @@ class FxPreviewTest {
 				s.update(dt);
 				t += dt;
 			}
-			float[] c = s.cp(3).set ? s.cp(3).pos : s.cp(0).pos;
-			frames[f] = new FxPreview(pack, SIDE, c.clone(), 256 / unitsAcross, 256, 256);
-			s.camera(c[0] - 2000, c[1], c[2]);
-			Renderers.draw(s, pack, SIDE, frames[f]);
+			float[] c = view == SIDE ? (s.cp(3).set ? s.cp(3).pos : s.cp(0).pos).clone() : new float[3];
+			frames[f] = new FxPreview(pack, view, c, 256 / unitsAcross, 256, 256);
+			s.camera(c[0] + view.eye()[0], c[1] + view.eye()[1], c[2] + view.eye()[2]);
+			Renderers.draw(s, pack, new Renderers.View(new float[] {c[0] + view.eye()[0], c[1] + view.eye()[1], c[2] + view.eye()[2]}, view.right(), view.up()), frames[f]);
 		}
 		FxPreview.writeStrip(frames, OUT.resolve(name + ".png"));
 		// What each system drew in the last frame.
@@ -78,6 +86,32 @@ class FxPreviewTest {
 					s.cp(0).position(0, 0, 0);
 					s.cp(0).orient(0, -1, 0, 0, 0, 1);
 				}, 99);
+			// Radiant Blast from above (facing up the image): the caster at the bottom, the cone ahead.
+			strip(pack, pack.effect("ability_unicorn_radiantblast", "m_CastParticle"), "radiant_blast", new float[] {0.05f, 0.15f, 0.3f, 0.6f, 1f},
+				1600, (s, t) -> {
+					float[][] at = {{0, 0, 0, 0}, {1, 779, 551, 0}, {2, 779, -551, 0}, {3, 0, 0, 120}, {4, 793, 0, 137}, {5, 30, 0, 76.5f},
+						{10, 779, 0, 0}, {15, 779, 0, -100}};
+					for (float[] p : at) {
+						s.cp((int) p[0]).position(p[1] - 400, p[2], p[3]);
+						s.cp((int) p[0]).orient(1, 0, 0, 0, 0, 1);
+					}
+				}, 99, TOP);
+			strip(pack, pack.effect("ability_unicorn_prismaticguard", "m_CastParticle"), "prismatic_guard", new float[] {0.05f, 0.15f, 0.3f, 0.6f, 1f},
+				400, (s, t) -> {
+					float[][] at = {{0, 0, 0, 0}, {1, 500, 0, -100}, {10, 15.6f, 0, 0.5f}, {4, -5, 0, -5}, {6, 0, 0, -100}};
+					for (float[] p : at) {
+						s.cp((int) p[0]).position(p[1], p[2], p[3]);
+						s.cp((int) p[0]).orient(1, 0, 0, 0, 0, 1);
+					}
+				}, 99, FRONT);
+			strip(pack, pack.effect("ability_unicorn_dazzlingorb", "m_ChargeParticle"), "orb_charge", new float[] {0.1f, 0.3f, 0.6f, 1f, 1.5f},
+				200, (s, t) -> {
+					float[][] at = {{0, 0, 0, -60}, {1, 10, 0, 40}, {2, 30, 20, 0}, {3, -20, -20, -30}, {6, 0, 0, -60}};
+					for (float[] p : at) {
+						s.cp((int) p[0]).position(p[1], p[2], p[3]);
+						s.cp((int) p[0]).orient(1, 0, 0, 0, 0, 1);
+					}
+				}, 99, FRONT);
 			// The tracer flying sideways across the view at Celeste's bullet speed, then stopped at 0.3 s.
 			strip(pack, pack.effect(gun, "m_mapWeaponInfos.primary.m_szBulletTravelTracerParticle"), "tracer",
 				new float[] {0.05f, 0.15f, 0.3f, 0.35f, 0.5f}, 160, (s, t) -> {
