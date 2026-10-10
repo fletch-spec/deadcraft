@@ -172,6 +172,8 @@ public final class HeroAnimator {
 	private float uncrouchedTime = 99;
 	/** How much of the legs come from the action's clip (less for a melee on the move: the run's legs step). */
 	private float clipLegs = 1;
+	/** How far the hero moved during the action, and its top speed (logged for melee: is Deadlock's lunge longer than the clip's step?). */
+	private float actionTravel, actionTopSpeed;
 	private final boolean[] notLegs;
 	/** Moving faster than this, blocks/s, a melee keeps the running legs. */
 	static final double MELEE_STEP_SPEED = 2;
@@ -323,6 +325,7 @@ public final class HeroAnimator {
 				else startAction(Action.MELEE, in.grounded() ? "melee_hit" : "melee_in_air_hit");
 				heavy = false;
 				actionRate = 1;
+		actionTravel = actionTopSpeed = 0;
 			} else {
 				quickMelee(in);
 			}
@@ -444,6 +447,8 @@ public final class HeroAnimator {
 			// Following the speed down to a crawl (spamming crouch slows the hero to ~0.4 blocks/s; at half
 			// rate the legs looked far too fast).
 			float rate = (float) Math.max(0.1, Math.min(2.0, speed / (state == State.RUN ? runSpeed : runSpeed * 0.5)));
+			// Under a melee's spinning hips, double-speed legs flailed: at most normal pace.
+			if (action == Action.MELEE && clipLegs < 1) rate = Math.min(rate, 1f);
 			HeroModel.Clip c = model.clips.get(state == State.RUN ? "out_of_combat_run_n" : "out_of_combat_crouch_run_n");
 			if (c != null) runPhase = (runPhase + dt * rate / c.duration()) % 1f;
 		}
@@ -670,6 +675,8 @@ public final class HeroAnimator {
 		if (action == Action.NONE) return;
 
 		actionTime += dt;
+		actionTravel += speed * dt;
+		actionTopSpeed = (float) Math.max(actionTopSpeed, speed);
 		clipTime += dt * (action == Action.SHOOT ? SHOOT_RATE : actionRate);
 		if (action == Action.RELOAD && reloadSignalSeen && in.reload() >= 0) clipTime = in.reload() * clipDuration(actionClip);
 		actionFade = Math.min(1, actionFade + dt / actionFadeS);
@@ -713,7 +720,8 @@ public final class HeroAnimator {
 		float target = actionCancelled || action == Action.SHOOT && actionDone ? 0 : Math.max(0, Math.min(1, left / ACTION_OUT_S));
 		actionWeight = approach(actionWeight, target, dt / (target > actionWeight ? ACTION_IN_S : ACTION_OUT_S));
 		if (actionDone && actionWeight <= 0) {
-			HeroRenderer.LOG.info("Deadcraft: action {} ended", action);
+			HeroRenderer.LOG.info("Deadcraft: action {} ended{}", action, action == Action.MELEE
+				? String.format(" (%s: travelled %.1f blocks in %.2f s, top speed %.1f blocks/s)", actionClip, actionTravel, actionTime, actionTopSpeed) : "");
 			action = Action.NONE;
 		}
 		// The whole body only standing still (crouched only for the clips with crouched versions); moving
