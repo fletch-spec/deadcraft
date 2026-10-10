@@ -2,12 +2,13 @@
 // install to a local .glb, for the Minecraft client to draw. Nothing exported is ever committed or
 // distributed: every player runs this against their own install.
 //
-//   dotnet run --project tools/hero-export <hero> [--deadlock <install dir>] [--out <dir>] [--triangles <n>] [--pack-only]
+//   dotnet run --project tools/hero-export <hero> [--deadlock <install dir>] [--out <dir>] [--triangles <n>] [--pack-only] [--fx]
 //
 // <hero> is Deadlock's internal name (Celeste is "unicorn"; see citadel_gc_hero_names_english.txt).
 // Output in %LOCALAPPDATA%\Deadcraft\heroes unless --out is given: <hero>.glb (the full export) and
 // <hero>.dchero + <hero>_<material>.png (what Minecraft loads; see HeroPack). --pack-only repacks an
-// existing .glb.
+// existing .glb. --fx writes only
+// <hero>.dcfx, the hero's visual effects (see FxPack); a full export writes it too.
 
 using System.Diagnostics;
 using SteamDatabase.ValvePak;
@@ -18,6 +19,7 @@ string deadlock = @"C:\Program Files (x86)\Steam\steamapps\common\Deadlock";
 string outDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deadcraft", "heroes");
 int triangles = 25000;
 bool packOnly = false;
+bool fxOnly = false;
 for (int i = 0; i < args.Length; i++)
 {
 	switch (args[i])
@@ -26,12 +28,13 @@ for (int i = 0; i < args.Length; i++)
 		case "--out": outDir = args[++i]; break;
 		case "--triangles": triangles = int.Parse(args[++i]); break;
 		case "--pack-only": packOnly = true; break;
+		case "--fx": fxOnly = true; break;
 		default: hero = args[i]; break;
 	}
 }
 if (hero == null)
 {
-	Console.Error.WriteLine("usage: hero-export <hero> [--deadlock <install dir>] [--out <dir>] [--triangles <n>] [--pack-only]   (Celeste is \"unicorn\")");
+	Console.Error.WriteLine("usage: hero-export <hero> [--deadlock <install dir>] [--out <dir>] [--triangles <n>] [--pack-only] [--fx]   (Celeste is \"unicorn\")");
 	return 2;
 }
 
@@ -70,6 +73,12 @@ string modelPath = model.GetFullPath()[..^2];  // LoadFileCompiled adds the "_c"
 Console.WriteLine($"model: {modelPath} ({model.TotalLength / 1024} KiB)");
 
 using var loader = new GameFileLoader(package, vpk);
+string fxPath = Path.Combine(outDir, hero + ".dcfx");
+if (fxOnly)
+{
+	Deadcraft.HeroExport.FxPack.Write(package, loader, hero, modelPath, fxPath);
+	return 0;
+}
 var resource = loader.LoadFileCompiled(modelPath) ?? throw new InvalidOperationException($"could not load {modelPath}");
 var exporter = new GltfModelExporter(loader)
 {
@@ -81,4 +90,5 @@ var watch = Stopwatch.StartNew();
 exporter.Export(resource, outPath, CancellationToken.None);
 Console.WriteLine($"wrote {outPath} ({new FileInfo(outPath).Length / 1024} KiB) in {watch.Elapsed.TotalSeconds:F1} s");
 Deadcraft.HeroExport.HeroPack.Write(outPath, packPath, triangles);
+Deadcraft.HeroExport.FxPack.Write(package, loader, hero, modelPath, fxPath);
 return 0;
