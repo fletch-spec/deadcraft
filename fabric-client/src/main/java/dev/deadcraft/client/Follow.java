@@ -342,8 +342,11 @@ public final class Follow {
 		double pitch = Math.toRadians(shot.direction.x()), yaw = Math.toRadians(shot.direction.y());
 		var dir = new net.minecraft.world.phys.Vec3(Math.cos(pitch) * Math.cos(yaw), -Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
 		var from = toWorld(Proto.toMinecraft(shot.origin));
-		if (gun) {
+		if (gun && lastState != null && (lastState.flags & HeroFlags.ON_GROUND) != 0
+			&& Math.abs(lastState.velocity.x()) + Math.abs(lastState.velocity.y()) + Math.abs(lastState.velocity.z()) < 20) {
 			// Where the shot's line passes the camera's ray, in the camera's right and up: the camera moves onto it.
+			// Only from shots fired standing still: moving (a landing most of all) the drawn camera trails the
+			// hero by the position delay, which read as an offset and dipped the camera.
 			var off = from.subtract(camera.position());
 			var up = camera.upVector();
 			var left = camera.leftVector();

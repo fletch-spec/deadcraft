@@ -41,9 +41,9 @@ public final class DeadlockCamera {
 	private static int aimShots;
 
 	static void learnShotLine(double rightBlocks, double upBlocks) {
-		// Each shot's line is measured from the camera as already shifted: move half the remaining way.
-		aimRight = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimRight + (float) rightBlocks * 0.5f));
-		aimUp = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimUp + (float) upBlocks * 0.5f));
+		// Each shot's line is measured from the camera as already shifted: move a quarter of the remaining way.
+		aimRight = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimRight + (float) rightBlocks * 0.25f));
+		aimUp = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimUp + (float) upBlocks * 0.25f));
 		if (++aimShots % 10 == 0 || aimShots <= 3) {
 			Follow.LOG.info("Deadcraft: camera moved onto the shots' line: {} right, {} up (Source units); last shot's line {} right, {} up of the ray",
 				String.format("%.1f", aimRight * 64), String.format("%.1f", aimUp * 64), String.format("%.2f", rightBlocks * 64), String.format("%.2f", upBlocks * 64));

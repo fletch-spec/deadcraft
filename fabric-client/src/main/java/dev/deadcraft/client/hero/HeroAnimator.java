@@ -58,7 +58,7 @@ public final class HeroAnimator {
 	static final float CROUCH_ENTER_S = 0.06f;
 	static final float SLIDE_ENTER_S = 0.03f;
 	/** Back up this long before standing: spamming crouch raised the eye for a few hundredths of a second at a time. */
-	static final float CROUCH_EXIT_S = 0.2f;
+	static final float CROUCH_EXIT_S = 0.08f;
 	/**
 	 * Run/idle switching with a margin, so speeds near the line don't flicker between the two. Standing,
 	 * Deadlock's hero drifts at up to about 0.7 blocks/s now and then (seen in game): not a run.
@@ -170,6 +170,11 @@ public final class HeroAnimator {
 	private float windupS = 0.5f, actionRate = 1, pressLength;
 	/** How long the eye has been back up after a crouch: spamming crouch flickers it every tenth of a second. */
 	private float uncrouchedTime = 99;
+	/** How much of the legs come from the action's clip (less for a melee on the move: the run's legs step). */
+	private float clipLegs = 1;
+	private final boolean[] notLegs;
+	/** Moving faster than this, blocks/s, a melee keeps the running legs. */
+	static final double MELEE_STEP_SPEED = 2;
 	/** The crossfade time of the current clip change. */
 	private float actionFadeS = ACTION_IN_S;
 	/** The spine's joints (layered over movement as a change) and the arms and wand (played as they are). */
@@ -213,6 +218,8 @@ public final class HeroAnimator {
 		aimHead = new boolean[upper.length];
 		for (String n : new String[] {"neck_0", "head"}) if (model.node(n) >= 0) aimHead[model.node(n)] = true;
 		legs = model.subtree("leg_upper_L", "leg_upper_R");
+		notLegs = new boolean[legs.length];
+		for (int n = 0; n < legs.length; n++) notLegs[n] = !legs[n];
 		pelvis = model.node("pelvis");
 		layered = model.subtree("spine_0", "leg_upper_L", "leg_upper_R");
 		world = new float[model.nodeCount() * 12];
@@ -716,6 +723,7 @@ public final class HeroAnimator {
 		boolean legs = action == Action.MELEE || in.grounded() && (state == State.IDLE || state == State.LAND || state == State.STOP
 			|| state == State.CROUCH_IDLE && (action == Action.SHOOT || action == Action.RELOAD));
 		actionLegs = approach(actionLegs, legs ? 1 : 0, dt / 0.15f);
+		clipLegs = approach(clipLegs, action == Action.MELEE && in.grounded() && speed > MELEE_STEP_SPEED ? 0 : 1, dt / 0.1f);
 		orbWeight = approach(orbWeight, action == Action.ORB && !actionDone ? 1 : 0, dt / AIM_EASE_S);
 	}
 
@@ -748,7 +756,12 @@ public final class HeroAnimator {
 			top.addDifference(actionMix, actionReference, w * (1 - actionLegs), spineChain);
 			top.blendTowards(actionMix, w * (1 - actionLegs), limbs);
 		}
-		if (actionLegs > 0) top.blendTowards(actionMix, w * actionLegs);
+		if (actionLegs > 0) {
+			// A melee on the move (the heavy one lunges): the legs keep running, so she steps instead of
+			// sliding along on the clip's planted feet; the hips and body still spin with the clip.
+			top.blendTowards(actionMix, w * actionLegs, notLegs);
+			top.blendTowards(actionMix, w * actionLegs * clipLegs, legs);
+		}
 	}
 
 	/**
@@ -788,8 +801,10 @@ public final class HeroAnimator {
 		HeroModel.Clip centre = model.clips.get(set), to = model.clips.get(set + dir);
 		if (weight <= 0 || centre == null || to == null) return;
 		float busy = action == Action.RELOAD || action == Action.MELEE || action == Action.CAST ? smooth(actionWeight) : 0;
-		top.addLayer(to, centre, clock, weight * (1 - busy), aimed);
-		top.addLayer(to, centre, clock, weight * busy, aimHead);
+		// At a fixed frame: the aim clips are poses, and looping them (every 2 s, out of step with the idle)
+		// showed as a snap in the standing idle whenever the camera looked up or down.
+		top.addLayer(to, centre, 0, weight * (1 - busy), aimed);
+		top.addLayer(to, centre, 0, weight * busy, aimHead);
 	}
 
 	private static float approach(float value, float target, float step) {

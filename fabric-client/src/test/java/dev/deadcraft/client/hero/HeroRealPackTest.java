@@ -432,6 +432,43 @@ class HeroRealPackTest {
 
 	}
 
+	/**
+	 * Standing with the camera a little up or down, the idle has no snap: the aim clips looped every 2 s,
+	 * out of step with the idle, and jumped back at each loop. No frame steps much more than the idle's own.
+	 */
+	@Test
+	void idleWithPitchDoesNotSnap() throws Exception {
+		HeroModel m = celeste();
+		double level = worstHeadStep(m, 0), looking = worstHeadStep(m, 25);
+		assertTrue(looking < level * 1.5 + 0.001, "looking down 25 deg the head jumps " + looking + " m in a frame, against " + level + " m level");
+	}
+
+	private static double worstHeadStep(HeroModel m, float pitch) {
+		HeroAnimator anim = new HeroAnimator(m);
+		int head = m.node("head");
+		double worst = 0, px = 0, py = 0, pz = 0;
+		for (int i = 0; i < 120 * 6; i++) {
+			anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, pitch, 0, false), 1 / 120f);
+			float[] w = anim.lastWorld();
+			double x = w[head * 12 + 3], y = w[head * 12 + 7], z = w[head * 12 + 11];
+			if (i > 60) worst = Math.max(worst, Math.sqrt(sq(x - px) + sq(y - py) + sq(z - pz)));
+			px = x; py = y; pz = z;
+		}
+		return worst;
+	}
+
+	/** Standing up for real after a crouch takes effect at once (the hold for crouch spam kept her down 0.2 s). */
+	@Test
+	void standingUpIsPrompt() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		for (int i = 0; i < 60; i++) anim.update(new HeroAnimator.Input(3, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE), 1 / 120f);
+		for (int i = 0; i < 120; i++) anim.update(new HeroAnimator.Input(3, 0, 0, true, 55, 64, HeroAnimator.Wall.NONE), 1 / 120f);
+		assertTrue(anim.state() == HeroAnimator.State.CROUCH_RUN, "crouched: " + anim.state());
+		for (int i = 0; i < 12; i++) anim.update(new HeroAnimator.Input(3, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE), 1 / 120f);
+		assertTrue(anim.state() == HeroAnimator.State.RUN, "0.1 s after standing up: " + anim.state());
+	}
+
 	/** A shot right after a reload starts shooting at once (it waited for the reload to fade out, then lagged). */
 	@Test
 	void shotAfterReloadStartsAtOnce() throws Exception {
