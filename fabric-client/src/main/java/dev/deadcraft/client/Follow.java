@@ -341,6 +341,12 @@ public final class Follow {
 	/** Bullets are traced this far, blocks. */
 	private static final double SHOT_RANGE = 128;
 	/**
+	 * Ability bullets (Radiant Blast's cone: 12 of them, spread up to 33 deg and down into the ground) reach
+	 * this far, blocks: the blast's 779 units (its effect's length). Traced 128 blocks, their hits landed far
+	 * off and around her. Celeste's only bullet ability; other heroes' differ.
+	 */
+	private static final double ABILITY_RANGE = 779 / 64.0;
+	/**
 	 * Celeste's bullets (Deadlock's scripts/abilities.vdata, citadel_weapon_unicorn_set): 1968.5 units/s,
 	 * gravity scale 0.2, 5 s lifetime. Deadlock's gravity is taken as Source's default 800 units/s/s
 	 * (unverified). Other heroes' weapons differ; ability bullets are drawn straight.
@@ -390,9 +396,11 @@ public final class Follow {
 		HitResult hit = null;
 		var path = new java.util.ArrayList<net.minecraft.world.phys.Vec3>();
 		path.add(from);
-		for (double t = 0; t < (gun ? BULLET_LIFETIME : 1) && travelled < SHOT_RANGE; t += step) {
+		double range = gun ? SHOT_RANGE : ABILITY_RANGE;
+		for (double t = 0; t < (gun ? BULLET_LIFETIME : 1) && travelled < range; t += step) {
 			var next = p.add(v.scale(step));
 			if (gun) v = v.add(0, -BULLET_GRAVITY * step, 0);
+			if (!gun && travelled + next.distanceTo(p) > range) next = p.add(next.subtract(p).normalize().scale(range - travelled));
 			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
 			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
 			travelled += end.distanceTo(p);

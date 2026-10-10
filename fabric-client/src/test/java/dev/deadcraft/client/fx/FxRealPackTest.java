@@ -166,6 +166,9 @@ class FxRealPackTest {
 			}
 			assertTrue(drawn.quads > 0, "the impact draws");
 			assertTrue(t < 3, "the impact is over in " + t + " s");
+			// Its rays are short streaks (trail length times the last step: m_bIgnoreDT); times the speed, they
+			// were 4-block sheets across the screen.
+			assertTrue(drawn.reach < 160, "the impact reaches " + drawn.reach + " units from the hit");
 			System.out.println("impact textures: " + drawn.textures);
 		}
 	}

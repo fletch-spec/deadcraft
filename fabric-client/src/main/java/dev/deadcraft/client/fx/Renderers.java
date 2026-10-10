@@ -42,6 +42,13 @@ public final class Renderers {
 		final boolean animateInFps;
 		final String animationType;
 		final float[] tmp = new float[3];
+		/**
+		 * Deadlock's on-screen size limits, as radius per unit of camera distance: a card fades out between the
+		 * start and end fade sizes (so a glow swallowing the camera disappears) and is clamped between the
+		 * minimum and maximum sizes. Sprites always; trails and ropes when fading and clamping is on.
+		 */
+		final FloatInput startFade, endFade, minSize, maxSize;
+		final boolean fadeAndClamp;
 
 		Renderer(Map<String, Object> m, Compiler c) {
 			String tex = null;
@@ -70,6 +77,30 @@ public final class Renderers {
 			animationRate = Kv3.f(m, "m_flAnimationRate", 0.1f);
 			animateInFps = Kv3.b(m, "m_bAnimateInFPS", false);
 			animationType = Kv3.s(m, "m_nAnimationType", "ANIMATION_TYPE_FIXED_RATE");
+			boolean sprite = "C_OP_RenderSprites".equals(Kv3.s(m, "_class", ""));
+			fadeAndClamp = sprite || Kv3.b(m, "m_bEnableFadingAndClamping", false);
+			startFade = Inputs.floatInput(m.get("m_flStartFadeSize"), sprite ? 1e8f : 1000, c);
+			endFade = Inputs.floatInput(m.get("m_flEndFadeSize"), sprite ? 2e8f : 2000, c);
+			minSize = Inputs.floatInput(m.get("m_flMinSize"), 0, c);
+			maxSize = Inputs.floatInput(m.get("m_flMaxSize"), sprite ? 5000 : 2000, c);
+		}
+
+		/**
+		 * How much of a card of this radius, this far from the camera, is drawn (1 whole, 0 skipped), by the
+		 * on-screen fade sizes.
+		 */
+		float sizeFade(FxSystem sys, float radius, float distance) {
+			if (!fadeAndClamp) return 1;
+			float start = startFade.get(null, sys) * distance, end = endFade.get(null, sys) * distance;
+			if (radius <= start) return 1;
+			if (radius >= end) return 0;
+			return 1 - Inputs.remap(radius, start, end);
+		}
+
+		/** A radius clamped to the on-screen size limits. */
+		float clampSize(FxSystem sys, float radius, float distance) {
+			if (!fadeAndClamp) return radius;
+			return Math.min(Math.max(radius, minSize.get(null, sys) * distance), maxSize.get(null, sys) * distance);
 		}
 
 		abstract void draw(FxSystem sys, FxPack pack, View view, Sink sink);
@@ -194,7 +225,11 @@ public final class Renderers {
 			for (Particle p : sys.particles) {
 				float r = p.radius * radiusScale.get(p, sys);
 				if (r <= 0) continue;
-				int col = color(p, sys, 1);
+				float distance = Inputs.dist(view.eye(), p.pos);
+				float fade = sizeFade(sys, r, distance);
+				if (fade <= 0) continue;
+				r = clampSize(sys, r, distance);
+				int col = color(p, sys, fade);
 				if ((col >>> 24) == 0) continue;
 				// The card's axes.
 				switch (orientation) {
@@ -249,6 +284,8 @@ public final class Renderers {
 
 	static final class Trails extends Renderer {
 		private final float maxLength, minLength, lengthScale, lengthFadeIn;
+		/** Length is the trail length times the last step, not times the speed (m_bIgnoreDT). */
+		private final boolean ignoreDt;
 		private final FloatInput headTaper, tailTaper, headAlpha, tailAlpha;
 		private final float[] xyz = new float[12], uv = new float[8], rect = new float[4], side = new float[3];
 		private final int[] argb = new int[4];
@@ -259,6 +296,7 @@ public final class Renderers {
 			minLength = Kv3.f(m, "m_flMinLength", 0);
 			lengthScale = Kv3.f(m, "m_flLengthScale", 1);
 			lengthFadeIn = Kv3.f(m, "m_flLengthFadeInTime", 0);
+			ignoreDt = Kv3.b(m, "m_bIgnoreDT", false);
 			headTaper = Inputs.floatInput(m.get("m_flRadiusHeadTaper"), 1, c);
 			tailTaper = Inputs.floatInput(m.get("m_flRadiusTaper"), 1, c);
 			headAlpha = Inputs.floatInput(m.get("m_flHeadAlphaScale"), 1, c);
@@ -268,7 +306,7 @@ public final class Renderers {
 		@Override
 		void draw(FxSystem sys, FxPack pack, View view, Sink sink) {
 			FxPack.Sheet sheet = pack.sheet(texture);
-			float oneOverDt = 1 / Math.max(1e-4f, sys.previousFrameTime > 0 ? sys.previousFrameTime : sys.frameTime);
+			float oneOverDt = ignoreDt ? 1 : 1 / Math.max(1e-4f, sys.previousFrameTime > 0 ? sys.previousFrameTime : sys.frameTime);
 			for (Particle p : sys.particles) {
 				float dx = p.prev[0] - p.pos[0], dy = p.prev[1] - p.pos[1], dz = p.prev[2] - p.pos[2];
 				float d = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -281,13 +319,16 @@ public final class Renderers {
 				length = Math.max(minLength, Math.min(maxLength, length));
 				if (length == 0) continue;
 				float r = p.radius * radiusScale.get(p, sys);
+				float distance = Inputs.dist(view.eye(), p.pos);
+				float fade = sizeFade(sys, r, distance);
+				if (fade <= 0) continue;
 				// Across the streak, facing the camera.
 				float tx = view.eye[0] - p.pos[0], ty = view.eye[1] - p.pos[1], tz = view.eye[2] - p.pos[2];
 				side[0] = dy * tz - dz * ty;
 				side[1] = dz * tx - dx * tz;
 				side[2] = dx * ty - dy * tx;
 				Functions.normalize(side);
-				float hr = r * headTaper.get(p, sys), tr = r * tailTaper.get(p, sys);
+				float hr = clampSize(sys, r * headTaper.get(p, sys), distance), tr = clampSize(sys, r * tailTaper.get(p, sys), distance);
 				float[] o = p.pos;
 				float ex = o[0] + dx * length, ey = o[1] + dy * length, ez = o[2] + dz * length;
 				put(0, o[0] - side[0] * hr, o[1] - side[1] * hr, o[2] - side[2] * hr);
@@ -303,7 +344,7 @@ public final class Renderers {
 				uv[5] = rect[3];
 				uv[6] = rect[0];
 				uv[7] = rect[3];
-				int head = color(p, sys, headAlpha.get(p, sys)), tail = color(p, sys, tailAlpha.get(p, sys));
+				int head = color(p, sys, headAlpha.get(p, sys) * fade), tail = color(p, sys, tailAlpha.get(p, sys) * fade);
 				argb[0] = argb[1] = head;
 				argb[2] = argb[3] = tail;
 				sink.quad(texture, additive, xyz, uv, argb, brightness(p, sys));
@@ -352,6 +393,10 @@ public final class Renderers {
 				Particle p0 = ordered.get(i), p1 = ordered.get(i + 1);
 				sideAt(i + 1, view, side);
 				float r0 = p0.radius * radiusScale.get(p0, sys), r1 = p1.radius * radiusScale.get(p1, sys);
+				float d0 = Inputs.dist(view.eye(), p0.pos), d1 = Inputs.dist(view.eye(), p1.pos);
+				float f0 = sizeFade(sys, r0, d0), f1 = sizeFade(sys, r1, d1);
+				r0 = clampSize(sys, r0, d0);
+				r1 = clampSize(sys, r1, d1);
 				float seg = Inputs.dist(p0.pos, p1.pos);
 				float v1 = v + seg * inv;
 				put(0, p0.pos, prevSide, -r0);
@@ -366,8 +411,8 @@ public final class Renderers {
 				uv[5] = v1;
 				uv[6] = 0;
 				uv[7] = v1;
-				argb[0] = argb[1] = color(p0, sys, 1);
-				argb[2] = argb[3] = color(p1, sys, 1);
+				argb[0] = argb[1] = color(p0, sys, f0);
+				argb[2] = argb[3] = color(p1, sys, f1);
 				if (((argb[0] | argb[2]) >>> 24) != 0) sink.quad(texture, additive, xyz, uv, argb, (brightness(p0, sys) + brightness(p1, sys)) / 2);
 				v = v1;
 				System.arraycopy(side, 0, prevSide, 0, 3);
