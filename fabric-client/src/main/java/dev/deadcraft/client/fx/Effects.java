@@ -47,6 +47,9 @@ public final class Effects {
 	private static String packHero;
 	private static String problem = "";
 	private static final List<Active> active = new ArrayList<>();
+	/** Effects started while the active ones are being stepped (a tracer starting its impact) join after. */
+	private static final List<Active> starting = new ArrayList<>();
+	private static boolean stepping;
 	private static long lastNanos;
 	private static long seed = 1;
 	private static RenderPipeline additive, blended;
@@ -140,7 +143,7 @@ public final class Effects {
 		if (active.size() >= MAX_ACTIVE) active.remove(0).system.stop();
 		Active a = new Active(new FxSystem(p, path, seed++ * 7919), at.x, at.y, at.z, driver);
 		a.place(0, at, forward);
-		active.add(a);
+		(stepping ? starting : active).add(a);
 		return a;
 	}
 
@@ -192,7 +195,7 @@ public final class Effects {
 		String flame = weapon == null ? null : p.effect(weapon, BATON_FLAME);
 		for (int i = 0; i < WAND_ENDS.length; i++) {
 			Active a = wandFlames[i];
-			boolean alive = a != null && active.contains(a) && !a.stopped;
+			boolean alive = a != null && (active.contains(a) || starting.contains(a)) && !a.stopped;
 			if (flame == null) {
 				if (alive) {
 					a.stopped = true;
@@ -290,6 +293,7 @@ public final class Effects {
 		var left = camera.leftVector();
 		var up = camera.upVector();
 
+		stepping = true;
 		for (Iterator<Active> it = active.iterator(); it.hasNext();) {
 			Active a = it.next();
 			a.time += dt;
@@ -301,6 +305,9 @@ public final class Effects {
 			a.system.update(dt);
 			if ((a.time > MAX_LIFE_S && !a.persistent) || (a.time > 0.05f && a.system.finished())) it.remove();
 		}
+		stepping = false;
+		active.addAll(starting);
+		starting.clear();
 		if (active.isEmpty() || pack == null) return;
 
 		Map<String, Bucket> buckets = new LinkedHashMap<>();
@@ -423,7 +430,13 @@ public final class Effects {
 		String safe = texture == null ? "white" : texture.toLowerCase().replaceAll("[^a-z0-9/._-]", "_");
 		id = Identifier.fromNamespaceAndPath("deadcraft", "fx/" + safe);
 		NativeImage image = null;
-		byte[] png = pack == null ? null : pack.texturePng(texture);
+		if (Renderers.SOFT_DOT.equals(texture)) {
+			int size = 64;
+			int[] px = Renderers.softDot(size);
+			image = new NativeImage(size, size, false);
+			for (int i = 0; i < px.length; i++) image.setPixel(i % size, i / size, px[i]);
+		}
+		byte[] png = pack == null || image != null ? null : pack.texturePng(texture);
 		if (png != null) {
 			try {
 				image = NativeImage.read(png);

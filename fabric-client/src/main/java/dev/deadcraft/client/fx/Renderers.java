@@ -54,7 +54,8 @@ public final class Renderers {
 				}
 			}
 			if (tex == null) tex = Kv3.s(m, "m_hTexture", null);
-			texture = tex;
+			// No colour texture: Deadlock draws a soft round card (a dark square here otherwise).
+			texture = tex == null ? SOFT_DOT : tex;
 			String blend = Kv3.s(m, "m_nOutputBlendMode", "PARTICLE_OUTPUT_BLEND_MODE_ALPHA");
 			additive = blend.contains("ADD") || Kv3.b(m, "m_bAdditive", false);
 			radiusScale = Inputs.floatInput(m.get("m_flRadiusScale"), 1, c);
@@ -77,15 +78,11 @@ public final class Renderers {
 			colorScale.get(p, sys, tmp);
 			float bright = overbright.get(p, sys) * (1 + addSelf.get(p, sys)) * (selfIllum.get(p, sys) + diffuse.get(p, sys) * AMBIENT) * colorMul;
 			float a = Inputs.clamp01(p.alpha * alphaScale.get(p, sys) * alphaMul);
-			int r = channel(p.color[0] * tmp[0], bright), g = channel(p.color[1] * tmp[1], bright), b = channel(p.color[2] * tmp[2], bright);
-			return ((int) (a * 255 + 0.5f) << 24) | (r << 16) | (g << 8) | b;
-		}
-
-		private int channel(float c, float bright) {
-			float lin = (gamma ? toLinear(Inputs.clamp01(c)) : Math.max(0, c)) * bright;
-			// Soft roll-off above the knee: overbright cores go white, glows keep their hue.
-			float rolled = lin <= KNEE ? lin : KNEE + (1 - KNEE) * (1 - (float) Math.exp(-(lin - KNEE) / (1 - KNEE)));
-			return (int) (toSrgb(rolled) * 255 + 0.5f);
+			for (int k = 0; k < 3; k++) {
+				float c = p.color[k] * tmp[k];
+				tmp[k] = (gamma ? toLinear(Inputs.clamp01(c)) : Math.max(0, c)) * bright;
+			}
+			return ((int) (a * 255 + 0.5f) << 24) | tonemap(tmp);
 		}
 
 		/** The sprite sheet frame for a particle: u0, v0, u1, v1. */
@@ -116,7 +113,44 @@ public final class Renderers {
 		}
 	}
 
-	static final float AMBIENT = 0.8f, KNEE = 0.75f;
+	static final float AMBIENT = 0.8f, KNEE = 0.6f;
+	/** The texture name for cards with none: a soft round dot (Effects and previews make it). */
+	public static final String SOFT_DOT = "deadcraft:soft_dot";
+
+	/**
+	 * Linear HDR colour to an sRGB RGB int: the brightest channel is rolled off above a knee and the others
+	 * scaled with it (the hue survives; clamping each channel turned every overbright glow white), then very
+	 * bright colours whiten a little, as Deadlock's tone mapping and bloom do.
+	 */
+	static int tonemap(float[] c) {
+		float m = Math.max(c[0], Math.max(c[1], c[2]));
+		float r = c[0], g = c[1], b = c[2];
+		if (m > KNEE) {
+			float rolled = KNEE + (1 - KNEE) * (1 - (float) Math.exp(-(m - KNEE) / (1 - KNEE)));
+			float k = rolled / m;
+			float white = Inputs.clamp01((m - 1) / (m + 4)) * 0.6f;
+			r = r * k + (rolled - r * k) * white;
+			g = g * k + (rolled - g * k) * white;
+			b = b * k + (rolled - b * k) * white;
+		}
+		int ri = (int) (toSrgb(r) * 255 + 0.5f), gi = (int) (toSrgb(g) * 255 + 0.5f), bi = (int) (toSrgb(b) * 255 + 0.5f);
+		return (ri << 16) | (gi << 8) | bi;
+	}
+
+	/** The soft dot, as ARGB pixels of a size x size image. */
+	public static int[] softDot(int size) {
+		int[] px = new int[size * size];
+		for (int y = 0; y < size; y++) {
+			for (int x = 0; x < size; x++) {
+				float dx = (x + 0.5f) / size * 2 - 1, dy = (y + 0.5f) / size * 2 - 1;
+				float d = (float) Math.sqrt(dx * dx + dy * dy);
+				float a = Inputs.clamp01(1 - d);
+				a = a * a * (3 - 2 * a);
+				px[y * size + x] = ((int) (a * 255) << 24) | 0xFFFFFF;
+			}
+		}
+		return px;
+	}
 
 	static Renderer create(Map<String, Object> m, Compiler c) {
 		String cls = Kv3.s(m, "_class", "?");
