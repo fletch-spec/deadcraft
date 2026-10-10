@@ -318,6 +318,12 @@ public final class Follow {
 
 	/** Bullets are traced this far, blocks. */
 	private static final double SHOT_RANGE = 128;
+	/**
+	 * Celeste's bullets (Deadlock's scripts/abilities.vdata, citadel_weapon_unicorn_set): 1968.5 units/s,
+	 * gravity scale 0.2, 5 s lifetime. Deadlock's gravity is taken as Source's default 800 units/s/s
+	 * (unverified). Other heroes' weapons differ; ability bullets are drawn straight.
+	 */
+	private static final double BULLET_SPEED = 1968.5 / 64, BULLET_GRAVITY = 0.2 * 800 / 64, BULLET_LIFETIME = 5;
 
 	private static void fired(Minecraft mc, Shot shot) {
 		boolean gun = shot.kind == ShotKind.FIRED;
@@ -336,14 +342,35 @@ public final class Follow {
 		double pitch = Math.toRadians(shot.direction.x()), yaw = Math.toRadians(shot.direction.y());
 		var dir = new net.minecraft.world.phys.Vec3(Math.cos(pitch) * Math.cos(yaw), -Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
 		var from = toWorld(Proto.toMinecraft(shot.origin));
-		var hit = mc.level.clip(new ClipContext(from, from.add(dir.scale(SHOT_RANGE)), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
-		var to = hit.getLocation();
-		double length = to.distanceTo(from);
-		for (double d = 1.5; d < length; d += 1.5) {
-			var p = from.add(dir.scale(d));
-			mc.level.addAlwaysVisibleParticle(ParticleTypes.END_ROD, p.x, p.y, p.z, 0, 0, 0);
+		if (gun) {
+			// Where the shot's line passes the camera's ray, in the camera's right and up: the camera moves onto it.
+			var off = from.subtract(camera.position());
+			var up = camera.upVector();
+			var left = camera.leftVector();
+			DeadlockCamera.learnShotLine(-(off.x * left.x() + off.y * left.y() + off.z * left.z()), off.x * up.x() + off.y * up.y() + off.z * up.z());
 		}
-		if (hit.getType() == HitResult.Type.MISS) return;
+		// The bullet's flight: Celeste's drop under gravity, in short straight steps through Minecraft's blocks.
+		var p = from;
+		var v = dir.scale(gun ? BULLET_SPEED : SHOT_RANGE);
+		double step = 1 / 30.0, travelled = 0, sinceTrail = 0;
+		HitResult hit = null;
+		for (double t = 0; t < (gun ? BULLET_LIFETIME : 1) && travelled < SHOT_RANGE; t += step) {
+			var next = p.add(v.scale(step));
+			if (gun) v = v.add(0, -BULLET_GRAVITY * step, 0);
+			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
+			double seg = end.distanceTo(p);
+			for (double d = 1.5 - sinceTrail; d < seg; d += 1.5) {
+				var q = p.add(end.subtract(p).scale(d / seg));
+				mc.level.addAlwaysVisibleParticle(ParticleTypes.END_ROD, q.x, q.y, q.z, 0, 0, 0);
+			}
+			sinceTrail = (sinceTrail + seg) % 1.5;
+			travelled += seg;
+			p = end;
+			if (hit.getType() != HitResult.Type.MISS) break;
+		}
+		if (hit == null || hit.getType() == HitResult.Type.MISS) return;
+		var to = hit.getLocation();
 		for (int i = 0; i < 4; i++) mc.level.addAlwaysVisibleParticle(ParticleTypes.ELECTRIC_SPARK, to.x, to.y, to.z, 0, 0, 0);
 		if (gun) measure(mc, to, 0);
 	}

@@ -52,7 +52,7 @@ public abstract class CameraMixin {
 		setRotation(yRot, xRot + DeadlockCamera.aimPitchOffset());
 		// Follow places the player exactly every frame (xo == x), so no partial-tick lerp is needed.
 		setPosition(entity.getX(), entity.getY() + DeadlockCamera.eyeHeightBlocks(), entity.getZ());
-		move(0f, DeadlockCamera.upBlocks(), DeadlockCamera.rightBlocks());  // the third axis points right in 26.3
+		move(0f, DeadlockCamera.upBlocks() + DeadlockCamera.aimUpBlocks(), DeadlockCamera.rightBlocks() + DeadlockCamera.aimRightBlocks());  // the third axis points right in 26.3
 		move(-getMaxZoom(DeadlockCamera.distanceBlocks()), 0f, 0f);
 	}
 

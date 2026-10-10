@@ -80,7 +80,11 @@ public final class HeroAnimator {
 	/** Melee held this long is a heavy melee (the wind-up holds until the hit); shorter, a quick one (by eye: unverified). */
 	static final float HEAVY_AFTER_S = 0.25f;
 	/** The shooting clips play at this rate (at full speed they looked too quick). */
-	static final float SHOOT_RATE = 0.7f;
+	static final float SHOOT_RATE = 0.8f;
+	/** Each shot restarts the recoil with this short a crossfade. */
+	static final float RECOIL_FADE_S = 0.05f;
+	/** A held heavy melee repeats when its cooldown allows; the wind-up starts this long before the next hit. */
+	static final float HEAVY_WINDUP_S = 0.45f, HEAVY_MAX_WAIT_S = 1.2f;
 	/** Weapon stance lasts this long after the last shot or action (a guess: unverified against Deadlock). */
 	static final float COMBAT_HOLD_S = 3f;
 	/** Stance changes, aim strength and actions ease over these. */
@@ -154,9 +158,13 @@ public final class HeroAnimator {
 	private int pendingSlot = -1;
 	private float pendingTime;
 	private long buttonsBefore;
-	private boolean shotEventsSeen, orbChanneled, actionCancelled, reloadSignalSeen, meleeButtonSeen, heavy;
-	/** How long melee has been held (negative: not held), and since the last melee started from its button. */
-	private float meleeHeld = -1, sinceButtonMelee = 99;
+	private boolean shotEventsSeen, orbChanneled, actionCancelled, reloadSignalSeen, heavy, shotPending, meleeThisPress;
+	/** How long melee has been held (negative: not held); a held heavy melee's repeat interval and time since its last hit. */
+	private float meleeHeld = -1, heavyInterval = 2f, sinceHeavyHit = 99, sinceQuickMelee = 99;
+	/** The crossfade time of the current clip change. */
+	private float actionFadeS = ACTION_IN_S;
+	/** The spine's joints (layered over movement as a change) and the arms and wand (played as they are). */
+	private final boolean[] spineChain, limbs;
 	private float combatTime = COMBAT_HOLD_S, stance, aimWeight, orbWeight, sinceShot = 99, pitch;
 	private int meleeCount;
 	private boolean actionDone;
@@ -190,6 +198,9 @@ public final class HeroAnimator {
 		for (int n = 0; n < upper.length; n++) lower[n] = !upper[n];
 		// Aim clips also turn the weapon, but not weaponPivot: theirs is in the clips' other root frame.
 		aimed = model.subtree("spine_0", "weapon");
+		spineChain = new boolean[upper.length];
+		for (String n : new String[] {"spine_0", "spine_1", "spine_2", "spine_3", "neck_0", "head"}) if (model.node(n) >= 0) spineChain[model.node(n)] = true;
+		limbs = model.subtree("clavicle_L", "clavicle_R", "weaponPivot");
 		legs = model.subtree("leg_upper_L", "leg_upper_R");
 		pelvis = model.node("pelvis");
 		layered = model.subtree("spine_0", "leg_upper_L", "leg_upper_R");
@@ -248,6 +259,7 @@ public final class HeroAnimator {
 	/** The server fired one of the hero's shots. */
 	public void shot() {
 		shotEventsSeen = true;
+		shotPending = true;
 		sinceShot = 0;
 		combatTime = 0;
 	}
@@ -281,12 +293,18 @@ public final class HeroAnimator {
 		} else if (n.contains("parry")) {
 			startAction(Action.MELEE, in.grounded() ? "parry" : "parry_inair");
 		} else if (n.contains("melee")) {
-			// The event comes at the hit: the button starts melee (wind-up included) when it's been seen.
-			if (action == Action.MELEE && heavy && !actionDone) {
-				switchClip(in.grounded() ? "melee_hit" : "melee_in_air_hit", 0);
+			// A quick melee's event comes as it starts (button still down); a heavy one's at the hit, after the
+			// wind-up the button started, and again every cooldown while the button stays down.
+			if (meleeHeld >= HEAVY_AFTER_S || action == Action.MELEE && heavy && !actionDone) {
+				if (meleeHeld >= 0 && sinceHeavyHit < 4) heavyInterval = sinceHeavyHit;
+				sinceHeavyHit = 0;
+				if (action == Action.MELEE && heavy && !actionDone) switchClip(in.grounded() ? "melee_hit" : "melee_in_air_hit", 0);
+				else startAction(Action.MELEE, in.grounded() ? "melee_hit" : "melee_in_air_hit");
 				heavy = false;
-			} else if (!meleeButtonSeen || sinceButtonMelee > 1.5f) {
+				meleeThisPress = true;
+			} else if (!meleeThisPress && sinceQuickMelee > 0.6f) {
 				quickMelee(in);
+				meleeThisPress = meleeHeld >= 0;
 			}
 		} else if (n.startsWith("ability_")) {
 			cast(n);
@@ -294,6 +312,7 @@ public final class HeroAnimator {
 	}
 
 	private void quickMelee(Input in) {
+		sinceQuickMelee = 0;
 		meleeCount++;
 		startAction(Action.MELEE, (in.grounded() ? "melee_quick_" : "melee_quick_in_air_") + (meleeCount % 2 == 0 ? 2 : 1));
 	}
@@ -315,7 +334,7 @@ public final class HeroAnimator {
 		if (action == Action.ORB && kind != Action.ORB && !actionDone) return;
 		if (kind.ordinal() < action.ordinal() && !actionDone) return;
 		HeroRenderer.LOG.info("Deadcraft: action {} -> {} {}", action, kind, clip);
-		switchClip(clip, 0);
+		switchClip(clip, 0, ACTION_IN_S);
 		action = kind;
 		referenceClip = clip;
 		actionTime = 0;
@@ -327,9 +346,14 @@ public final class HeroAnimator {
 
 	/** Plays {@code clip} from {@code time}, crossfading from what the action showed. */
 	private void switchClip(String clip, float time) {
+		switchClip(clip, time, ACTION_IN_S);
+	}
+
+	private void switchClip(String clip, float time, float fadeS) {
 		if (actionWeight > 0) {
 			actionPrevious.copyFrom(actionMix);
 			actionFade = 0;
+			actionFadeS = fadeS;
 		}
 		actionClip = clip;
 		clipTime = time;
@@ -588,44 +612,46 @@ public final class HeroAnimator {
 			String clip = !in.grounded() || state == State.SLIDE || speed > MOVE_START ? "reload_run" : crouched ? "reload_crouch_idle" : "reload_idle";
 			startAction(Action.RELOAD, clip);
 		}
-		// Melee: a tap is a quick melee; held, the heavy one's wind-up, holding until the hit (release or event).
-		sinceButtonMelee += dt;
+		// Melee: a tap is a quick melee (from its event, or the release); held, the heavy one's wind-up, which
+		// holds until its hit's event. Kept held, Deadlock strikes again each cooldown: standing between, the
+		// wind-up timed to the interval measured between hits.
+		sinceHeavyHit += dt;
+		sinceQuickMelee += dt;
 		if ((b & MELEE) != 0) {
-			meleeButtonSeen = true;
 			meleeHeld = meleeHeld < 0 ? 0 : meleeHeld + dt;
-			if (meleeHeld >= HEAVY_AFTER_S && !(action == Action.MELEE && heavy) && sinceButtonMelee > 0.5f) {
+			boolean first = !meleeThisPress && meleeHeld >= HEAVY_AFTER_S;
+			boolean repeat = meleeThisPress && sinceHeavyHit < 4 && sinceHeavyHit >= heavyInterval - HEAVY_WINDUP_S;
+			if ((first || repeat) && !(action == Action.MELEE && (heavy || !actionDone))) {
 				startAction(Action.MELEE, in.grounded() ? "melee_start" : "melee_in_air_start");
 				heavy = action == Action.MELEE;
-				sinceButtonMelee = 0;
+				meleeThisPress = true;
 			}
 		} else if (meleeHeld >= 0) {
-			if (meleeHeld < HEAVY_AFTER_S) {
-				quickMelee(in);
-				sinceButtonMelee = 0;
-			} else if (action == Action.MELEE && heavy && !actionDone) {
-				switchClip(in.grounded() ? "melee_hit" : "melee_in_air_hit", 0);
-				heavy = false;
-			}
+			if (!meleeThisPress) quickMelee(in);
 			meleeHeld = -1;
+			meleeThisPress = false;
 		}
-		if (shooting && firing && action == Action.NONE) startAction(Action.SHOOT, crouched ? "shoot_crouch_start" : "shoot_idle_start");
+		// Each shot: the first starts the shooting pose (and may cut a reload's fade), later ones restart the
+		// recoil. Without shot events, the fire button.
+		boolean newShot = shotPending || firing && !shotEventsSeen && action == Action.NONE;
+		shotPending = false;
+		if (newShot) {
+			String set = crouched ? "shoot_crouch_" : "shoot_idle_";
+			if (action == Action.SHOOT && !actionDone) switchClip(set + "loop", 0, RECOIL_FADE_S);
+			else if (action == Action.NONE || actionDone) startAction(Action.SHOOT, set + "start");
+		}
 		if (action == Action.NONE) return;
 
 		actionTime += dt;
 		clipTime += action == Action.SHOOT ? dt * SHOOT_RATE : dt;
 		if (action == Action.RELOAD && reloadSignalSeen && in.reload() >= 0) clipTime = in.reload() * clipDuration(actionClip);
-		actionFade = Math.min(1, actionFade + dt / ACTION_IN_S);
+		actionFade = Math.min(1, actionFade + dt / actionFadeS);
 		float left = Float.MAX_VALUE;
 		switch (action) {
 			case SHOOT -> {
-				// The start once (it ends aimed, and holds there between shots), the loop through continuous fire.
-				String set = crouched ? "shoot_crouch_" : "shoot_idle_";
-				referenceClip = set + "start";
-				float start = clipDuration(set + "start");
-				if (actionTime * SHOOT_RATE >= start) {
-					if (firing && !actionClip.equals(set + "loop")) switchClip(set + "loop", 0);
-					else if (!firing && !actionClip.equals(set + "start")) switchClip(set + "start", start);
-				}
+				// The start for the first shot, the loop's recoil restarted by each later one; each holds its
+				// last (aimed) frame until the next shot.
+				referenceClip = (crouched ? "shoot_crouch_" : "shoot_idle_") + "start";
 				actionDone = !shooting;
 			}
 			case ORB -> {
@@ -644,9 +670,12 @@ public final class HeroAnimator {
 				if (left <= 0) actionDone = true;
 			}
 			case MELEE -> {
-				// The heavy wind-up holds on its last frame until the hit.
+				// The heavy wind-up holds on its last frame until the hit (or gives up: released, no hit came).
 				left = heavy ? Float.MAX_VALUE : clipDuration(actionClip) - clipTime;
-				if (heavy && actionTime > 3) heavy = false;
+				if (heavy && actionTime > HEAVY_MAX_WAIT_S) {
+					heavy = false;
+					actionCancelled = actionDone = true;
+				}
 				if (left <= 0) actionDone = true;
 			}
 			default -> {
@@ -669,16 +698,20 @@ public final class HeroAnimator {
 	}
 
 	/**
-	 * Puts the action into {@link #top}. Standing still, its clip as it is (whole body); moving or in the
-	 * air, its change from its own first pose on the upper body, over the movement, so the run (or the
-	 * jump) carries on underneath: played as it is, a standing clip held the torso rigid over the legs.
+	 * Puts the action into {@link #top}. Standing still, its clip as it is (whole body). Moving or in the
+	 * air, the spine takes the action's change from its own first pose over the movement, so the run (or
+	 * the jump) carries on underneath (played as it is, a standing clip held the torso rigid over the
+	 * legs), and the arms and the wand play the clip as it is (added as changes too, the wand came back
+	 * from a reload toss to the wrong place over a jump, and a moving quick melee looked wrong).
 	 */
 	private void applyAction() {
 		if (action == Action.NONE || actionWeight <= 0) return;
 		HeroModel.Clip c = model.clips.get(actionClip), ref = model.clips.get(referenceClip);
 		if (c == null) return;
+		// Shooting clips hold their last frame between shots (the loop clip isn't looped: each shot restarts it).
+		float time = action == Action.SHOOT ? Math.min(clipTime, c.duration()) : clipTime;
 		actionPose.clear();
-		actionPose.add(c, clipTime, 1);
+		actionPose.add(c, time, 1);
 		actionPose.finish();
 		actionMix.copyFrom(actionPose);
 		if (actionFade < 1) {
@@ -690,7 +723,8 @@ public final class HeroAnimator {
 			actionReference.clear();
 			actionReference.add(ref, 0, 1);
 			actionReference.finish();
-			top.addDifference(actionMix, actionReference, w * (1 - actionLegs), upper);
+			top.addDifference(actionMix, actionReference, w * (1 - actionLegs), spineChain);
+			top.blendTowards(actionMix, w * (1 - actionLegs), limbs);
 		}
 		if (actionLegs > 0) top.blendTowards(actionMix, w * actionLegs);
 	}

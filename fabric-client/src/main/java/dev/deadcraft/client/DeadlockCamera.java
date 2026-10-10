@@ -27,12 +27,39 @@ public final class DeadlockCamera {
 		return AIM_PITCH_OFFSET;
 	}
 
+	/**
+	 * Learned from the hero's shots: how far right and up of the camera's ray the shots' line runs, blocks.
+	 * The camera moves by it so its ray (the crosshair) lies on that line and shots land on the crosshair
+	 * at every distance. Deadlock's shots leave from the weapon, below where this camera sits.
+	 */
+	private static float aimRight, aimUp;
+	private static final float AIM_SHIFT_MAX = 0.75f;
+	private static int aimShots;
+
+	static void learnShotLine(double rightBlocks, double upBlocks) {
+		// Each shot's line is measured from the camera as already shifted: move half the remaining way.
+		aimRight = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimRight + (float) rightBlocks * 0.5f));
+		aimUp = Math.max(-AIM_SHIFT_MAX, Math.min(AIM_SHIFT_MAX, aimUp + (float) upBlocks * 0.5f));
+		if (++aimShots % 10 == 0 || aimShots <= 3) {
+			Follow.LOG.info("Deadcraft: camera moved onto the shots' line: {} right, {} up (Source units); last shot's line {} right, {} up of the ray",
+				String.format("%.1f", aimRight * 64), String.format("%.1f", aimUp * 64), String.format("%.2f", rightBlocks * 64), String.format("%.2f", upBlocks * 64));
+		}
+	}
+
 	public static boolean enabled() {
 		return enabled;
 	}
 
 	public static float distanceBlocks() {
 		return distance / Proto.UNITS_PER_BLOCK;
+	}
+
+	public static float aimRightBlocks() {
+		return aimRight;
+	}
+
+	public static float aimUpBlocks() {
+		return aimUp;
 	}
 
 	public static float rightBlocks() {

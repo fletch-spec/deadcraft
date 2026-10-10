@@ -338,7 +338,12 @@ class HeroRealPackTest {
 		assertTrue(!after.contains("RELOAD"), "still reloading after the weapon finished: " + after);
 	}
 
-	/** Melee from its button: a tap is a quick melee; held, the heavy wind-up holds, and the hit plays on release. */
+	/**
+	 * Melee from its button. A tap is one quick melee (its event comes while the button is down; the release
+	 * doesn't start another). Held, the heavy wind-up waits for the hit's event; kept held, Deadlock strikes
+	 * again each cooldown: she stands between (the wind-up held its last frame until then), winding up
+	 * again just before the next hit, timed from the interval between hits.
+	 */
 	@Test
 	void meleeFollowsItsButton() throws Exception {
 		HeroModel m = celeste();
@@ -346,17 +351,39 @@ class HeroRealPackTest {
 		var idle = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
 		var held = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.MELEE, false);
 		HeroAnimator anim = new HeroAnimator(m);
-		for (int i = 0; i < 10; i++) anim.update(held, dt);
+		for (int i = 0; i < 5; i++) anim.update(held, dt);
+		anim.ability("ability_melee_unicorn", held, Double.NaN);
+		for (int i = 0; i < 5; i++) anim.update(held, dt);
 		anim.update(idle, dt);
-		anim.ability("ability_melee_unicorn", idle, Double.NaN);
 		assertTrue(anim.debugLine().contains("MELEE melee_quick_1"), "a tap: " + anim.debugLine());
+
 		anim = new HeroAnimator(m);
+		for (int i = 0; i < 60; i++) anim.update(held, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_start"), "held half a second: " + anim.debugLine());
+		anim.ability("ability_melee_unicorn", held, Double.NaN);
+		anim.update(held, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "the hit: " + anim.debugLine());
 		for (int i = 0; i < 120; i++) anim.update(held, dt);
-		assertTrue(anim.debugLine().contains("MELEE melee_start"), "held a second: " + anim.debugLine());
-		anim.update(idle, dt);
-		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "released: " + anim.debugLine());
-		anim.ability("ability_melee_unicorn", idle, Double.NaN);
-		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "the hit's event started it over: " + anim.debugLine());
+		assertTrue(anim.debugLine().contains("action NONE"), "still held, waiting for the cooldown: not standing: " + anim.debugLine());
+		for (int i = 0; i < 70; i++) anim.update(held, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_start"), "no wind-up before the next hit: " + anim.debugLine());
+		anim.ability("ability_melee_unicorn", held, Double.NaN);
+		anim.update(held, dt);
+		assertTrue(anim.debugLine().contains("MELEE melee_hit"), "the second hit: " + anim.debugLine());
+	}
+
+	/** A shot right after a reload starts shooting at once (it waited for the reload to fade out, then lagged). */
+	@Test
+	void shotAfterReloadStartsAtOnce() throws Exception {
+		HeroModel m = celeste();
+		HeroAnimator anim = new HeroAnimator(m);
+		float dt = 1 / 120f;
+		for (int i = 0; i < 120 * 2; i++) {
+			float reload = i < 200 ? i / 200f : -1;
+			if (i == 201) anim.shot();
+			anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.ATTACK, false, 0xF, reload), dt);
+			if (i == 202) assertTrue(anim.debugLine().contains("SHOOT shoot_idle_start"), "a frame after the shot: " + anim.debugLine());
+		}
 	}
 
 	/** Looking up raises the head and looking down lowers it, in and out of weapon stance. */
