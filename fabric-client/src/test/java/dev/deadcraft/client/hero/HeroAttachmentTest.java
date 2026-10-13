@@ -15,10 +15,10 @@ import org.junit.jupiter.api.Test;
 class HeroAttachmentTest {
 	@Test
 	void attachmentsSitOnTheModel() throws Exception {
-		Path dir = HeroRenderer.heroDirectory();
-		assumeTrue(Files.exists(dir.resolve("unicorn.dchero")) && Files.exists(dir.resolve("unicorn.dcfx")), "no exported Celeste");
-		HeroModel m = HeroModel.load(dir.resolve("unicorn.dchero"));
-		try (FxPack fx = FxPack.load(dir.resolve("unicorn.dcfx"))) {
+		Path hero = HeroRenderer.heroFile("unicorn.dchero"), effects = HeroRenderer.heroFile("unicorn.dcfx");
+		assumeTrue(Files.exists(hero) && Files.exists(effects), "no exported Celeste");
+		HeroModel m = HeroModel.load(hero);
+		try (FxPack fx = FxPack.load(effects)) {
 			HeroAnimator anim = new HeroAnimator(m);
 			float[] skin = null;
 			for (int i = 0; i < 60; i++) skin = anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE), 1 / 60f);

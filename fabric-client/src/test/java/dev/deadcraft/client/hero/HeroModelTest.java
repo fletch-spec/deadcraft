@@ -160,7 +160,7 @@ class HeroModelTest {
 	/** On a real export (skipped where none exists): the rest pose skins every joint to identity. */
 	@Test
 	void realPackRestPoseIsIdentity() throws Exception {
-		Path file = HeroRenderer.heroDirectory().resolve("unicorn.dchero");
+		Path file = HeroRenderer.heroFile("unicorn.dchero");
 		assumeTrue(java.nio.file.Files.exists(file), "no exported Celeste on this machine");
 		HeroModel m = HeroModel.load(file);
 		HeroModel.Pose pose = m.newPose();

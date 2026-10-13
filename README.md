@@ -69,7 +69,7 @@ Filled in as each component lands.
    ```
    fabric-client\gradlew -p fabric-client runClient
    ```
-10. Hero model, once per hero (Celeste is `unicorn`; writes `%LOCALAPPDATA%\Deadcraft\heroes\unicorn.glb`, never committed):
+10. Hero model, once per hero (Celeste is `unicorn`; writes `%USERPROFILE%\Deadcraft\heroes\unicorn.glb`, or `%DEADCRAFT_HOME%\heroes` if set; never committed):
    ```
    dotnet run --project tools/hero-export unicorn
    ```

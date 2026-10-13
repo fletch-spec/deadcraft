@@ -100,9 +100,23 @@ public final class HeroRenderer {
 			m.m02() * x + m.m12() * y + m.m22() * z + m.m32());
 	}
 
+	/**
+	 * Where hero-export writes each hero's files: {@code DEADCRAFT_HOME} if set, else {@code %USERPROFILE%\Deadcraft},
+	 * then {@code heroes}. Not AppData: a packaged app (the Claude desktop app, say) that runs the exporter has its
+	 * AppData writes redirected into its own package folder, which a Minecraft started elsewhere never sees.
+	 */
 	public static Path heroDirectory() {
+		String home = System.getenv("DEADCRAFT_HOME");
+		return (home == null || home.isBlank() ? Path.of(System.getProperty("user.home"), "Deadcraft") : Path.of(home)).resolve("heroes");
+	}
+
+	/** A hero file: in {@link #heroDirectory()}, or where exports used to go ({@code %LOCALAPPDATA%\Deadcraft\heroes}). */
+	public static Path heroFile(String name) {
+		Path file = heroDirectory().resolve(name);
 		String local = System.getenv("LOCALAPPDATA");
-		return Path.of(local == null ? System.getProperty("user.home") : local, "Deadcraft", "heroes");
+		if (Files.exists(file) || local == null) return file;
+		Path old = Path.of(local, "Deadcraft", "heroes", name);
+		return Files.exists(old) ? old : file;
 	}
 
 	/** Called by Follow every frame while linked. Speeds in blocks per second, relative to facing. */
@@ -134,7 +148,7 @@ public final class HeroRenderer {
 	private static void load() {
 		loadedHero = hero;
 		model = null;
-		Path file = heroDirectory().resolve(hero + ".dchero");
+		Path file = heroFile(hero + ".dchero");
 		if (!Files.exists(file)) {
 			problem = "no " + file + " (run: dotnet run --project tools/hero-export " + hero + ")";
 			LOG.warn("Deadcraft: hero model: {}", problem);

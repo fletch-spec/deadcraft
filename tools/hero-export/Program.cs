@@ -5,7 +5,7 @@
 //   dotnet run --project tools/hero-export <hero> [--deadlock <install dir>] [--out <dir>] [--triangles <n>] [--pack-only] [--fx]
 //
 // <hero> is Deadlock's internal name (Celeste is "unicorn"; see citadel_gc_hero_names_english.txt).
-// Output in %LOCALAPPDATA%\Deadcraft\heroes unless --out is given: <hero>.glb (the full export) and
+// Output in %USERPROFILE%\Deadcraft\heroes (or %DEADCRAFT_HOME%\heroes) unless --out is given: <hero>.glb (the full export) and
 // <hero>.dchero + <hero>_<material>.png (what Minecraft loads; see HeroPack). --pack-only repacks an
 // existing .glb. --fx writes only
 // <hero>.dcfx, the hero's visual effects (see FxPack); a full export writes it too.
@@ -16,7 +16,11 @@ using ValveResourceFormat.IO;
 
 string? hero = null;
 string deadlock = @"C:\Program Files (x86)\Steam\steamapps\common\Deadlock";
-string outDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Deadcraft", "heroes");
+// Not AppData: a packaged app (the Claude desktop app, say) running this has AppData writes redirected into its
+// own package folder, where a Minecraft started elsewhere never finds them.
+string? home = Environment.GetEnvironmentVariable("DEADCRAFT_HOME");
+string outDir = Path.Combine(string.IsNullOrWhiteSpace(home)
+	? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Deadcraft") : home, "heroes");
 int triangles = 25000;
 bool packOnly = false;
 bool fxOnly = false;

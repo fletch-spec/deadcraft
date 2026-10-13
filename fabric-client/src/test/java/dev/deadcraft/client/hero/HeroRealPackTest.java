@@ -21,7 +21,7 @@ class HeroRealPackTest {
 	private static final double MAX_WAND_REACH = 5.0;
 
 	private static HeroModel celeste() throws Exception {
-		Path file = HeroRenderer.heroDirectory().resolve("unicorn.dchero");
+		Path file = HeroRenderer.heroFile("unicorn.dchero");
 		assumeTrue(Files.exists(file), "no exported Celeste on this machine");
 		return HeroModel.load(file);
 	}
@@ -30,7 +30,7 @@ class HeroRealPackTest {
 	@Test
 	void matchesTheExporter() throws Exception {
 		HeroModel m = celeste();
-		Path ref = HeroRenderer.heroDirectory().resolve("unicorn.reference");
+		Path ref = HeroRenderer.heroFile("unicorn.reference");
 		assumeTrue(Files.exists(ref), "no reference frame beside the export");
 		ByteBuffer b = ByteBuffer.wrap(Files.readAllBytes(ref)).order(ByteOrder.LITTLE_ENDIAN);
 		int n = b.getInt();

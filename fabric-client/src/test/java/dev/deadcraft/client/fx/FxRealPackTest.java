@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
+import dev.deadcraft.client.hero.HeroRenderer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
@@ -19,8 +20,7 @@ class FxRealPackTest {
 	static final String GUN = "citadel_weapon_unicorn_set";
 
 	static FxPack celeste() throws Exception {
-		String local = System.getenv("LOCALAPPDATA");
-		Path file = Path.of(local == null ? System.getProperty("user.home") : local, "Deadcraft", "heroes", "unicorn.dcfx");
+		Path file = HeroRenderer.heroFile("unicorn.dcfx");
 		assumeTrue(Files.exists(file), "no exported Celeste effects on this machine");
 		return FxPack.load(file);
 	}

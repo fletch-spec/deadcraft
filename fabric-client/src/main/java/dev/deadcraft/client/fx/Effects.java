@@ -102,7 +102,7 @@ public final class Effects {
 		if (hero.equals(packHero)) return null;  // tried already
 		packHero = hero;
 		close();
-		Path file = HeroRenderer.heroDirectory().resolve(hero + ".dcfx");
+		Path file = HeroRenderer.heroFile(hero + ".dcfx");
 		if (!Files.exists(file)) {
 			problem = "no " + file + " (run: dotnet run --project tools/hero-export " + hero + " --fx)";
 			FxPack.LOG.warn("Deadcraft: effects: {}", problem);
