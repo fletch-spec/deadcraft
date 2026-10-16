@@ -66,6 +66,111 @@ class FxPreviewTest {
 		System.out.println(name + ": quads per frame " + q.toString().trim());
 	}
 
+	/** Minecraft's clear daytime sky (sRGB), behind most third-person views. */
+	static final float[] DAY_SKY = {0.47f, 0.65f, 1f};
+	/** Pixels per unit in game: 180 units from the camera, about 59 deg vertical field of view, 1440 pixels high. */
+	static final float GAME_PIXELS_PER_UNIT = 7;
+
+	/** One run of an effect, drawn at each time over a background, with bloom at a strength (0: none). */
+	static FxPreview[] frames(FxPack pack, String path, float[] times, Setup setup, float stopAt, float[] background, float bloom) {
+		FxSystem s = new FxSystem(pack, path, 42);
+		FxPreview[] frames = new FxPreview[times.length];
+		float t = 0, dt = 1 / 120f;
+		boolean stopped = false;
+		for (int f = 0; f < times.length; f++) {
+			while (t < times[f]) {
+				setup.at(s, t);
+				if (!stopped && t >= stopAt) {
+					s.stop();
+					stopped = true;
+				}
+				s.update(dt);
+				t += dt;
+			}
+			float[] c = (s.cp(3).set ? s.cp(3).pos : s.cp(0).pos).clone();
+			float[] eye = {c[0] + SIDE.eye()[0], c[1] + SIDE.eye()[1], c[2] + SIDE.eye()[2]};
+			frames[f] = new FxPreview(pack, SIDE, c, GAME_PIXELS_PER_UNIT, 256, 256, background);
+			s.camera(eye[0], eye[1], eye[2]);
+			Renderers.draw(s, pack, new Renderers.View(eye, SIDE.right(), SIDE.up()), frames[f]);
+			if (bloom > 0) frames[f].bloom(bloom);
+		}
+		return frames;
+	}
+
+	/**
+	 * Bloom comparison at the game's scale (256 pixels is about 37 units, 0.6 blocks): rows are night, night with
+	 * bloom, day sky, day sky with bloom.
+	 */
+	static void bloomRows(FxPack pack, String path, String name, float[] times, Setup setup, float stopAt) throws Exception {
+		if (path == null) return;
+		float b = FxSettings.DEFAULT_BLOOM;
+		FxPreview.writeRows(new FxPreview[][] {frames(pack, path, times, setup, stopAt, null, 0), frames(pack, path, times, setup, stopAt, null, b),
+			frames(pack, path, times, setup, stopAt, DAY_SKY, 0), frames(pack, path, times, setup, stopAt, DAY_SKY, b)}, OUT.resolve("bloom_" + name + ".png"));
+	}
+
+	/**
+	 * Over Minecraft's daytime sky the wand flame's light shows only in its cards (round 5: "the space around the
+	 * wand where there should be a flame is empty"); bloom spreads it into a halo you can see around the wand.
+	 */
+	@Test
+	void bloomShowsTheWandFlameAgainstTheDaySky() throws Exception {
+		try (FxPack pack = FxRealPackTest.celeste()) {
+			String flame = pack.effect(FxRealPackTest.GUN, "m_BatonFlameParticle");
+			Setup at = (s, t) -> {
+				for (int cp : new int[] {0, 3}) {
+					s.cp(cp).position(0, 0, 0);
+					s.cp(cp).orient(0, 0, 1, 1, 0, 0);
+				}
+			};
+			FxPreview p0 = frames(pack, flame, new float[] {1}, at, 99, DAY_SKY, 0)[0], p1 = frames(pack, flame, new float[] {1}, at, 99, DAY_SKY, FxSettings.DEFAULT_BLOOM)[0];
+			float[] plain = ring(p0, 6, 10), glowing = ring(p1, 6, 10);
+			System.out.printf("around the flame over the day sky: %.3f without bloom, %.3f with (sky %.3f)%n", plain[0], glowing[0], plain[1]);
+			// 6 to 10 units out (beyond the flame's cards, 40 to 70 pixels on a 1440-pixel screen): sky without bloom...
+			org.junit.jupiter.api.Assertions.assertTrue(plain[0] - plain[1] < 0.01f, "without bloom the space around the flame is sky");
+			// ...and visibly brighter with it.
+			org.junit.jupiter.api.Assertions.assertTrue(glowing[0] - plain[1] > 0.05f, "bloom brightens the space around the flame");
+		}
+	}
+
+	/** Mean brightness in a ring (units from the frame's centre, the flame), and in the top-left corner (sky). */
+	private static float[] ring(FxPreview f, float from, float to) {
+		float ring = 0, corner = 0;
+		int nr = 0, nc = 0;
+		for (int y = 0; y < f.height; y++) {
+			for (int x = 0; x < f.width; x++) {
+				float d = (float) Math.hypot(x + 0.5f - f.width / 2f, y + 0.5f - f.height / 2f) / GAME_PIXELS_PER_UNIT;
+				int o = (y * f.width + x) * 3;
+				float v = (Math.min(1, f.rgb[o]) + Math.min(1, f.rgb[o + 1]) + Math.min(1, f.rgb[o + 2])) / 3;
+				if (d >= from && d <= to) {
+					ring += v;
+					nr++;
+				} else if (x < 8 && y < 8) {
+					corner += v;
+					nc++;
+				}
+			}
+		}
+		return new float[] {ring / nr, corner / nc};
+	}
+
+	@Test
+	void bloomPreviews() throws Exception {
+		try (FxPack pack = FxRealPackTest.celeste()) {
+			String gun = FxRealPackTest.GUN;
+			bloomRows(pack, pack.effect(gun, "m_BatonFlameParticle"), "wand_flame", new float[] {0.1f, 0.3f, 0.6f, 1f, 2f}, (s, t) -> {
+				for (int cp : new int[] {0, 3}) {
+					s.cp(cp).position(0, 0, 0);
+					s.cp(cp).orient(0, 0, 1, 1, 0, 0);
+				}
+			}, 99);
+			bloomRows(pack, pack.effect(gun, "m_mapWeaponInfos.primary.m_szMuzzleFlashEffectName"), "muzzle_flash",
+				new float[] {0.02f, 0.05f, 0.1f, 0.2f, 0.4f}, (s, t) -> {
+					s.cp(0).position(0, 0, 0);
+					s.cp(0).orient(0, -1, 0, 0, 0, 1);
+				}, 99);
+		}
+	}
+
 	@Test
 	void previews() throws Exception {
 		try (FxPack pack = FxRealPackTest.celeste()) {

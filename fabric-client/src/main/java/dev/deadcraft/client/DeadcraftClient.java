@@ -3,6 +3,7 @@ package dev.deadcraft.client;
 import com.mojang.brigadier.Command;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import dev.deadcraft.client.fx.FxSettings;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -42,6 +43,15 @@ public final class DeadcraftClient implements ClientModInitializer {
 						.executes(c -> reply(c.getSource(), Follow.delay(FloatArgumentType.getFloat(c, "ms")))))
 					.executes(c -> reply(c.getSource(), Follow.delay(null))))
 				.then(ClientCommands.literal("hud").executes(c -> reply(c.getSource(), TestHud.toggle())))
+				.then(ClientCommands.literal("fx")
+					.then(ClientCommands.literal("bloom").then(ClientCommands.argument("strength", FloatArgumentType.floatArg(0, FxSettings.MAX_BLOOM))
+						.executes(c -> reply(c.getSource(), FxSettings.setBloom(FloatArgumentType.getFloat(c, "strength"))))))
+					.then(ClientCommands.literal("brightness").then(ClientCommands.argument("factor", FloatArgumentType.floatArg(FxSettings.MIN_SCALE, FxSettings.MAX_SCALE))
+						.executes(c -> reply(c.getSource(), FxSettings.setBrightness(FloatArgumentType.getFloat(c, "factor"))))))
+					.then(ClientCommands.literal("size").then(ClientCommands.argument("factor", FloatArgumentType.floatArg(FxSettings.MIN_SCALE, FxSettings.MAX_SCALE))
+						.executes(c -> reply(c.getSource(), FxSettings.setSize(FloatArgumentType.getFloat(c, "factor"))))))
+					.then(ClientCommands.literal("reset").executes(c -> reply(c.getSource(), FxSettings.reset())))
+					.executes(c -> reply(c.getSource(), FxSettings.status())))
 				.then(ClientCommands.literal("hero")
 					.then(ClientCommands.literal("scale").then(ClientCommands.argument("factor", FloatArgumentType.floatArg(0.25f, 4f))
 						.executes(c -> reply(c.getSource(), Follow.heroScale(FloatArgumentType.getFloat(c, "factor"))))))

@@ -16,6 +16,8 @@ import javax.imageio.ImageIO;
 final class FxPreview implements Renderers.Sink {
 	final int width, height;
 	final float[] rgb;
+	/** The additive cards' light before the roll-off (what bloom spreads), linear, as fx_bloom.fsh. */
+	final float[] glow;
 	private final FxPack pack;
 	private final Renderers.View view;
 	private final float[] centre;
@@ -24,6 +26,11 @@ final class FxPreview implements Renderers.Sink {
 	int quads;
 
 	FxPreview(FxPack pack, Renderers.View view, float[] centre, float pixelsPerUnit, int width, int height) {
+		this(pack, view, centre, pixelsPerUnit, width, height, null);
+	}
+
+	/** Over a background colour (sRGB, as Minecraft's frame holds it): black when null. */
+	FxPreview(FxPack pack, Renderers.View view, float[] centre, float pixelsPerUnit, int width, int height, float[] background) {
 		this.pack = pack;
 		this.view = view;
 		this.centre = centre;
@@ -31,6 +38,8 @@ final class FxPreview implements Renderers.Sink {
 		this.width = width;
 		this.height = height;
 		this.rgb = new float[width * height * 3];
+		this.glow = new float[width * height * 3];
+		if (background != null) for (int i = 0; i < rgb.length; i++) rgb[i] = background[i % 3];
 	}
 
 	private BufferedImage texture(String path) {
@@ -101,6 +110,11 @@ final class FxPreview implements Renderers.Sink {
 				float alpha = ta * ca;
 				int o = (y * width + x) * 3;
 				float[] lin = {(float) Math.pow(tr, 2.2) * cr * bright, (float) Math.pow(tg, 2.2) * cg * bright, (float) Math.pow(tb, 2.2) * cb * bright};
+				// Bloom's source, as fx_bloom.fsh: additive cards' light, blended cards' light above white.
+				float[] g = new float[3];
+				for (int k = 0; k < 3; k++) g[k] = (additive ? lin[k] : Math.max(0, lin[k] - 1)) * alpha;
+				float gm = Math.max(g[0], Math.max(g[1], g[2]));
+				for (int k = 0; k < 3; k++) glow[o + k] += g[k] / (1 + gm / 8);
 				if (additive) for (int k = 0; k < 3; k++) lin[k] *= alpha;
 				int out = Renderers.tonemap(lin);
 				float or = (out >> 16 & 255) / 255f, og = (out >> 8 & 255) / 255f, ob = (out & 255) / 255f;
@@ -115,6 +129,41 @@ final class FxPreview implements Renderers.Sink {
 				}
 			}
 		}
+	}
+
+	/** Adds the bloom over the frame as Bloom.java does (strength as /deadcraft fx bloom). */
+	void bloom(float strength) {
+		float[] b = BloomPreview.blur(glow, width, height, BloomPreview.LEVELS);
+		for (int i = 0; i < rgb.length; i += 3) {
+			float[] lin = {b[i] * strength / BloomPreview.LEVELS, b[i + 1] * strength / BloomPreview.LEVELS, b[i + 2] * strength / BloomPreview.LEVELS};
+			float m = Math.max(lin[0], Math.max(lin[1], lin[2]));
+			if (m > 0.6f) {
+				float rolled = 0.6f + 0.4f * (1 - (float) Math.exp(-(m - 0.6f) / 0.4f));
+				for (int k = 0; k < 3; k++) lin[k] *= rolled / m;
+			}
+			for (int k = 0; k < 3; k++) rgb[i + k] += (float) Math.pow(Math.min(1, lin[k]), 1 / 2.2);
+		}
+	}
+
+	/** Rows of frames (each row a strip), written as one PNG. */
+	static void writeRows(FxPreview[][] rows, Path file) throws IOException {
+		int w = rows[0][0].width, h = rows[0][0].height, n = rows[0].length;
+		BufferedImage out = new BufferedImage(w * n, h * rows.length, BufferedImage.TYPE_INT_RGB);
+		for (int r = 0; r < rows.length; r++) {
+			for (int f = 0; f < n; f++) {
+				for (int y = 0; y < h; y++) {
+					for (int x = 0; x < w; x++) {
+						int o = (y * w + x) * 3;
+						float[] c = rows[r][f].rgb;
+						out.setRGB(f * w + x, r * h + y, ((int) (Math.min(1, c[o]) * 255) << 16) | ((int) (Math.min(1, c[o + 1]) * 255) << 8) | (int) (Math.min(1, c[o + 2]) * 255));
+					}
+				}
+				for (int y = 0; y < h; y++) out.setRGB(f * w, r * h + y, 0x404040);
+			}
+			for (int x = 0; x < w * n; x++) out.setRGB(x, r * h, 0x404040);
+		}
+		Files.createDirectories(file.getParent());
+		ImageIO.write(out, "png", file.toFile());
 	}
 
 	/** Lays frames side by side and writes a PNG. */

@@ -92,7 +92,9 @@ public final class Effects {
 	}
 
 	public static void register() {
+		FxSettings.load(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("deadcraft-fx.properties"));
 		LevelRenderEvents.COLLECT_SUBMITS.register(Effects::render);
+		LevelRenderEvents.END_MAIN.register(Bloom::render);
 	}
 
 	/** The current hero's effects pack, loaded on first use (null when there's none: see {@link #problem()}). */
@@ -378,6 +380,7 @@ public final class Effects {
 	}
 
 	private static void renderUnsafe(LevelRenderContext ctx) {
+		Bloom.begin();
 		maintainWand();
 		if (active.isEmpty()) {
 			lastNanos = 0;
@@ -410,25 +413,31 @@ public final class Effects {
 
 		Map<String, Bucket> buckets = new LinkedHashMap<>();
 		float[] right = {-left.x(), left.z(), -left.y()}, upSrc = {up.x(), -up.z(), up.y()};
+		float size = FxSettings.size(), brightness = FxSettings.brightness();
 		for (Active a : active) {
 			float[] eyeSrc = {(float) ((eye.x - a.ox) * UNITS_PER_BLOCK), (float) (-(eye.z - a.oz) * UNITS_PER_BLOCK), (float) ((eye.y - a.oy) * UNITS_PER_BLOCK)};
 			float bx = (float) (a.ox - eye.x), by = (float) (a.oy - eye.y), bz = (float) (a.oz - eye.z);
 			Renderers.draw(a.system, pack, new Renderers.View(eyeSrc, right, upSrc), (texture, add, xyz, uv, argb, bright) -> {
 				String key = (add ? "+" : "~") + texture;
 				Bucket b = buckets.computeIfAbsent(key, k -> new Bucket(texture, add));
+				// The size setting grows each card about its centre.
+				float cx = (xyz[0] + xyz[3] + xyz[6] + xyz[9]) / 4, cy = (xyz[1] + xyz[4] + xyz[7] + xyz[10]) / 4, cz = (xyz[2] + xyz[5] + xyz[8] + xyz[11]) / 4;
 				for (int i = 0; i < 4; i++) {
+					float x = cx + (xyz[i * 3] - cx) * size, y = cy + (xyz[i * 3 + 1] - cy) * size, z = cz + (xyz[i * 3 + 2] - cz) * size;
 					// Source (x, y, z) to Minecraft (x, z, -y), in blocks, relative to the camera.
-					b.add(bx + xyz[i * 3] / UNITS_PER_BLOCK, by + xyz[i * 3 + 2] / UNITS_PER_BLOCK, bz - xyz[i * 3 + 1] / UNITS_PER_BLOCK,
-						uv[i * 2], uv[i * 2 + 1], argb[i], bright);
+					b.add(bx + x / UNITS_PER_BLOCK, by + z / UNITS_PER_BLOCK, bz - y / UNITS_PER_BLOCK, uv[i * 2], uv[i * 2 + 1], argb[i], bright * brightness);
 				}
 			});
 		}
 		var collector = ctx.submitNodeCollector();
 		var poseStack = ctx.poseStack();
+		Bloom.pose(poseStack.last().pose());
 		for (Bucket b : buckets.values()) {
 			RenderType type = type(b.texture, b.additive);
 			if (type == null) continue;
 			drawnQuads += b.count / 4;
+			// The cards again, for the bloom drawn at the end of the main pass.
+			if (FxSettings.bloom() > 0) Bloom.add(textureId(b.texture), b.additive, b.data, b.colors, b.bright, b.count);
 			collector.submitCustomGeometry(poseStack, type, (pose, consumer) -> {
 				Matrix4f m = pose.pose();
 				float[] d = b.data;
@@ -565,8 +574,8 @@ public final class Effects {
 	/** For the 10 s readout: playing effects, quads drawn per frame, time per frame. */
 	public static String stats() {
 		if (framesDrawn == 0) return "fx idle";
-		String s = String.format("fx %d playing, %.0f quads/frame, %.2f ms/frame", active.size(), drawnQuads / (double) framesDrawn,
-			drawNanos / framesDrawn / 1e6);
+		String s = String.format("fx %d playing, %.0f quads/frame, %.2f ms/frame, %s", active.size(), drawnQuads / (double) framesDrawn,
+			drawNanos / framesDrawn / 1e6, Bloom.stats());
 		drawnQuads = 0;
 		framesDrawn = 0;
 		drawNanos = 0;
