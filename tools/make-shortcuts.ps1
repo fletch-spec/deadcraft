@@ -35,8 +35,9 @@ function New-Shortcut($name, $target, $arguments, $workDir, $icon) {
 	Write-Host "Created $name"
 }
 
+# The window closes once the server has started (it has its own console), or stays open to show an error.
 New-Shortcut 'Deadcraft 1 - Start the movement server' "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
-	"-NoExit -ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void" $repo "$repo\tools\icons\server-block.ico,0"
+	"-ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void -PauseOnError" $repo "$repo\tools\icons\server-block.ico,0"
 New-Shortcut 'Deadcraft 2 - Join with your hero' $steam `
 	"-applaunch $deadlockAppId -console +fps_max $DeadlockFps +connect localhost:27067" (Split-Path $steam) $deadlockIcon
 # The window closes with Minecraft, or stays open to show the error if the build or game fails.

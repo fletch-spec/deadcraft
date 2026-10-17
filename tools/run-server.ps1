@@ -6,9 +6,19 @@ param(
     [int]$Port = 27067,
     [string]$DeadlockDir = 'C:\Program Files (x86)\Steam\steamapps\common\Deadlock',
     # Capture the server console to this file instead of showing a console window (for diagnosing crashes).
-    [string]$LogFile = ''
+    [string]$LogFile = '',
+    # Wait for Enter before closing on an error (the desktop shortcut's window would vanish with the message).
+    [switch]$PauseOnError
 )
 $ErrorActionPreference = 'Stop'
+trap {
+    if ($PauseOnError) {
+        Write-Host "Couldn't start the server: $_" -ForegroundColor Red
+        Read-Host 'Press Enter to close'
+        exit 1
+    }
+    break
+}
 $bin = Join-Path $DeadlockDir 'game\bin\win64'
 if (-not (Test-Path (Join-Path $bin 'deadworks.exe'))) {
     throw 'deadworks.exe not found. Run .\tools\get-deadworks.ps1 -Install first.'
