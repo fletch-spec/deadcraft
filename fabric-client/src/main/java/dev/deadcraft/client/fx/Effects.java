@@ -30,9 +30,11 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
 /**
- * Plays the hero's Deadlock effects in Minecraft's world: each one a {@link FxSystem} in its own frame
- * (Source units, Z up, placed at an origin in the world), driven frame by frame (a tracer's control point
- * rides its bullet), and drawn as additive or blended quads through {@code LevelRenderEvents.COLLECT_SUBMITS}.
+ * Plays the hero's effects in Minecraft's world, drawn as additive or blended cards through
+ * {@code LevelRenderEvents.COLLECT_SUBMITS} (and bloomed, {@link Bloom}). Celeste's are hand-built
+ * ({@link CelesteFx}, {@link Vfx}) with Deadlock's textures from the effects pack: playing Deadlock's own particle
+ * systems ({@link FxSystem}, a port of its simulation) left too much missing or wrong in game (5 test rounds), so
+ * that path is no longer used for the wand and the gun, and abilities have no effects until theirs are built.
  */
 public final class Effects {
 	private Effects() {
@@ -49,6 +51,8 @@ public final class Effects {
 	private static final List<Active> active = new ArrayList<>();
 	/** Effects started while the active ones are being stepped (a tracer starting its impact) join after. */
 	private static final List<Active> starting = new ArrayList<>();
+	/** Hand-built effects playing, and ones started while those are being stepped. */
+	private static final List<Vfx> hand = new ArrayList<>(), handStarting = new ArrayList<>();
 	private static boolean stepping;
 	private static long lastNanos;
 	private static long seed = 1;
@@ -128,6 +132,9 @@ public final class Effects {
 
 	private static void close() {
 		active.clear();
+		hand.clear();
+		handStarting.clear();
+		for (int i = 0; i < wandFlames.length; i++) wandFlames[i] = null;
 		if (pack != null) {
 			try {
 				pack.close();
@@ -147,6 +154,18 @@ public final class Effects {
 		a.place(0, at, forward);
 		(stepping ? starting : active).add(a);
 		return a;
+	}
+
+	/** Starts a hand-built effect. */
+	static Vfx play(Vfx v) {
+		if (hand.size() >= MAX_ACTIVE) hand.remove(0).stop();
+		(stepping ? handStarting : hand).add(v);
+		return v;
+	}
+
+	/** True when the drawn hero has hand-built effects (Celeste). */
+	private static boolean handBuilt() {
+		return "unicorn".equals(HeroRenderer.heroName());
 	}
 
 	// ---- the hero's weapon and attachments --------------------------------------------------------
@@ -185,42 +204,22 @@ public final class Effects {
 	private static final String BATON_FLAME = "m_BatonFlameParticle";
 	/** The wand's ends, where its flames burn (Deadlock's weapon_top_fx and weapon_bot_fx). */
 	private static final String[] WAND_ENDS = {"weapon_top_fx", "weapon_bot_fx"};
-	private static final Active[] wandFlames = new Active[WAND_ENDS.length];
+	private static final Vfx[] wandFlames = new Vfx[WAND_ENDS.length];
 
-	/**
-	 * Keeps the gun's always-on flame burning at each end of the drawn wand while the hero is drawn. Its
-	 * control point 3 is where it burns; it works out 5 and 6 itself from how fast that point moves.
-	 */
+	/** Keeps a flame burning at each end of the drawn wand while the hero is drawn (it goes out when not). */
 	private static void maintainWand() {
-		FxPack p = HeroRenderer.drawnRecently() ? pack() : null;
-		String weapon = p == null ? null : weaponName();
-		String flame = weapon == null ? null : p.effect(weapon, BATON_FLAME);
+		FxPack p = HeroRenderer.drawnRecently() && handBuilt() ? pack() : null;
 		for (int i = 0; i < WAND_ENDS.length; i++) {
-			Active a = wandFlames[i];
-			boolean alive = a != null && (active.contains(a) || starting.contains(a)) && !a.stopped;
-			if (flame == null) {
-				if (alive) {
-					a.stopped = true;
-					a.system.stop();
-				}
+			Vfx flame = wandFlames[i];
+			boolean alive = flame != null && (hand.contains(flame) || handStarting.contains(flame));
+			if (p == null) {
+				if (alive) flame.stop();
 				wandFlames[i] = null;
 				continue;
 			}
-			if (alive) continue;
-			Vec3 at = attachmentWorld(WAND_ENDS[i]);
-			if (at == null) continue;
+			if (alive || attachmentWorld(WAND_ENDS[i]) == null) continue;
 			String end = WAND_ENDS[i];
-			Active started = play(flame, at, null, (fx, t) -> {
-				Vec3 now = HeroRenderer.drawnRecently() ? attachmentWorld(end) : null;
-				if (now == null) return false;
-				fx.place(0, now, null);
-				fx.place(3, now, null);
-				return true;
-			});
-			if (started != null) {
-				started.persistent = true;
-				wandFlames[i] = started;
-			}
+			wandFlames[i] = play(CelesteFx.wandFlame(p, () -> HeroRenderer.drawnRecently() ? attachmentWorld(end) : null, seed++ * 7919));
 		}
 	}
 
@@ -265,6 +264,10 @@ public final class Effects {
 	public static void ability(String name) {
 		FxPack p = broken ? null : pack();
 		if (p == null) return;
+		if (handBuilt()) {
+			if (abilityLogs++ < 10) FxPack.LOG.info("Deadcraft: ability {}: no hand-built effect yet", name);
+			return;
+		}
 		for (String[] k : CAST_KEYS) {
 			if (!k[0].equals(name)) continue;
 			String path = p.effect(k[0], k[1]);
@@ -276,7 +279,7 @@ public final class Effects {
 
 	/** Holds the orb's charge effect while the hero channels (Dazzling Orb), and lets it go when they stop. */
 	public static void channeling(boolean on) {
-		if (broken) return;
+		if (broken || handBuilt()) return;
 		boolean alive = orbCharge != null && (active.contains(orbCharge) || starting.contains(orbCharge)) && !orbCharge.stopped;
 		if (on && !alive) {
 			FxPack p = pack();
@@ -337,6 +340,7 @@ public final class Effects {
 	public static boolean gunShot(String weapon, Vec3 drawnMuzzle, List<Vec3> path, double step, Vec3 hitNormal) {
 		FxPack p = broken ? null : pack();
 		if (p == null || path.size() < 2) return false;
+		if (handBuilt()) return handShot(p, drawnMuzzle, path, step, hitNormal);
 		String tracer = p.effect(weapon, GUN_TRACER), muzzle = p.effect(weapon, GUN_MUZZLE), impact = p.effect(weapon, GUN_IMPACT);
 		if (tracer == null) return false;
 		Vec3 from = path.get(0), dir = path.get(1).subtract(from).normalize();
@@ -365,6 +369,50 @@ public final class Effects {
 		return true;
 	}
 
+	/** {@link #gunShot} with Celeste's hand-built muzzle flash, tracer and impact. */
+	private static boolean handShot(FxPack p, Vec3 drawnMuzzle, List<Vec3> path, double step, Vec3 hitNormal) {
+		Vec3 from = path.get(0), dir = path.get(1).subtract(from).normalize();
+		Vec3 wand = drawnMuzzle != null ? drawnMuzzle : from;
+		play(CelesteFx.muzzleFlash(p, wand, dir, seed++ * 7919));
+		Vec3 offset = wand.subtract(from);
+		double total = step * (path.size() - 1);
+		float[] clock = {0};
+		boolean[] done = {false};
+		// The bullet's position on its own clock (the tracer's ribbon steps it): from the drawn wand onto the real path.
+		Vfx tracer = CelesteFx.tracer(p, () -> {
+			if (done[0]) return null;
+			double t = clock[0];
+			double f = Math.min(t, total) / step;
+			int i = Math.min(path.size() - 2, (int) f);
+			Vec3 at = path.get(i).lerp(path.get(i + 1), f - i);
+			double blend = Math.max(0, 1 - t / MUZZLE_BLEND_S);
+			return at.add(offset.scale(blend * blend));
+		}, seed++ * 7919);
+		play(new Vfx() {
+			@Override
+			public boolean tick(float dt) {
+				clock[0] += dt;
+				if (!done[0] && clock[0] >= total) {
+					done[0] = true;
+					tracer.stop();
+					if (hitNormal != null) play(CelesteFx.impact(p, path.get(path.size() - 1), hitNormal, seed++ * 7919));
+				}
+				return tracer.tick(dt);
+			}
+
+			@Override
+			public void draw(Vec3 eye, Vec3 right, Vec3 up, Out out) {
+				tracer.draw(eye, right, up, out);
+			}
+
+			@Override
+			public void stop() {
+				tracer.stop();
+			}
+		});
+		return true;
+	}
+
 	// ---- per frame -------------------------------------------------------------------------------
 
 	private static void render(LevelRenderContext ctx) {
@@ -382,7 +430,7 @@ public final class Effects {
 	private static void renderUnsafe(LevelRenderContext ctx) {
 		Bloom.begin();
 		maintainWand();
-		if (active.isEmpty()) {
+		if (active.isEmpty() && hand.isEmpty() && handStarting.isEmpty()) {
 			lastNanos = 0;
 			return;
 		}
@@ -406,10 +454,15 @@ public final class Effects {
 			a.system.update(dt);
 			if ((a.time > MAX_LIFE_S && !a.persistent) || (a.time > 0.05f && a.system.finished())) it.remove();
 		}
+		for (Iterator<Vfx> it = hand.iterator(); it.hasNext();) {
+			if (!it.next().tick(dt)) it.remove();
+		}
 		stepping = false;
 		active.addAll(starting);
 		starting.clear();
-		if (active.isEmpty() || pack == null) return;
+		hand.addAll(handStarting);
+		handStarting.clear();
+		if ((active.isEmpty() && hand.isEmpty()) || pack == null) return;
 
 		Map<String, Bucket> buckets = new LinkedHashMap<>();
 		float[] right = {-left.x(), left.z(), -left.y()}, upSrc = {up.x(), -up.z(), up.y()};
@@ -426,6 +479,18 @@ public final class Effects {
 					float x = cx + (xyz[i * 3] - cx) * size, y = cy + (xyz[i * 3 + 1] - cy) * size, z = cz + (xyz[i * 3 + 2] - cz) * size;
 					// Source (x, y, z) to Minecraft (x, z, -y), in blocks, relative to the camera.
 					b.add(bx + x / UNITS_PER_BLOCK, by + z / UNITS_PER_BLOCK, bz - y / UNITS_PER_BLOCK, uv[i * 2], uv[i * 2 + 1], argb[i], bright * brightness);
+				}
+			});
+		}
+		// Hand-built effects: already in blocks, relative to the camera.
+		Vec3 rightMc = new Vec3(-left.x(), -left.y(), -left.z()), upMc = new Vec3(up.x(), up.y(), up.z());
+		for (Vfx v : hand) {
+			v.draw(eye, rightMc, upMc, (texture, add, xyz, uv, argb, bright) -> {
+				Bucket b = buckets.computeIfAbsent((add ? "+" : "~") + texture, k -> new Bucket(texture, add));
+				float cx = (xyz[0] + xyz[3] + xyz[6] + xyz[9]) / 4, cy = (xyz[1] + xyz[4] + xyz[7] + xyz[10]) / 4, cz = (xyz[2] + xyz[5] + xyz[8] + xyz[11]) / 4;
+				for (int i = 0; i < 4; i++) {
+					b.add(cx + (xyz[i * 3] - cx) * size, cy + (xyz[i * 3 + 1] - cy) * size, cz + (xyz[i * 3 + 2] - cz) * size, uv[i * 2], uv[i * 2 + 1],
+						argb[i], bright * brightness);
 				}
 			});
 		}
@@ -574,7 +639,7 @@ public final class Effects {
 	/** For the 10 s readout: playing effects, quads drawn per frame, time per frame. */
 	public static String stats() {
 		if (framesDrawn == 0) return "fx idle";
-		String s = String.format("fx %d playing, %.0f quads/frame, %.2f ms/frame, %s", active.size(), drawnQuads / (double) framesDrawn,
+		String s = String.format("fx %d playing, %.0f quads/frame, %.2f ms/frame, %s", active.size() + hand.size(), drawnQuads / (double) framesDrawn,
 			drawNanos / framesDrawn / 1e6, Bloom.stats());
 		drawnQuads = 0;
 		framesDrawn = 0;
