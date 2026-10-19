@@ -252,8 +252,8 @@ public final class Bloom {
 			.withColorTargetState(addFloat)
 			.withVertexBinding(0, FORMAT)
 			.withPrimitiveTopology(PrimitiveTopology.TRIANGLES)
-			// Behind blocks, hidden; the world's depth is left as it is.
-			.withDepthStencilState(new DepthStencilState(CompareOp.LESS_THAN_OR_EQUAL, false))
+			// Behind blocks, hidden (26.x depth is reversed: near is 1); the world's depth is left as it is.
+			.withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
 			.withCull(false)
 			.build();
 		down = post("fx_bloom_down", new ColorTargetState(Optional.empty(), GpuFormat.RGBA16_FLOAT, ColorTargetState.WRITE_ALL), false);

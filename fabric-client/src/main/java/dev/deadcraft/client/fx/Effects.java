@@ -575,8 +575,8 @@ public final class Effects {
 			.withColorTargetState(new ColorTargetState(add ? BlendFunction.LIGHTNING : BlendFunction.TRANSLUCENT))
 			.withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR_NORMAL)
 			.withPrimitiveTopology(PrimitiveTopology.QUADS)
-			// Hidden behind blocks, but not hiding what's behind it.
-			.withDepthStencilState(new DepthStencilState(CompareOp.LESS_THAN_OR_EQUAL, false))
+			// Hidden behind blocks (26.x depth is reversed: near is 1), but not hiding what's behind it.
+			.withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, false))
 			.withCull(false)
 			.build();
 		if (add) additive = p;
