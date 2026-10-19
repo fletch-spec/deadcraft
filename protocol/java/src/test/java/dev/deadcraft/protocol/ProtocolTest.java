@@ -86,6 +86,15 @@ class ProtocolTest {
 	}
 
 	@Test
+	void clampsAHostileCubeCount() {
+		assertEquals(0, Mapping.cubesToRead(0));
+		assertEquals(3, Mapping.cubesToRead(3));
+		assertEquals(Proto.CUBES_CAPACITY, Mapping.cubesToRead(Proto.CUBES_CAPACITY + 1));
+		assertEquals(Proto.CUBES_CAPACITY, Mapping.cubesToRead(-1));  // 0xFFFFFFFF unsigned
+		assertEquals(Proto.CUBES_CAPACITY, Mapping.cubesToRead(Integer.MIN_VALUE));
+	}
+
+	@Test
 	void roundTripsThroughSharedMemory() {
 		String name = "Local\\DeadcraftTest_" + UUID.randomUUID().toString().replace("-", "");
 		try (Mapping writer = Mapping.openOrCreate(name); Mapping reader = Mapping.openExisting(name).orElseThrow()) {

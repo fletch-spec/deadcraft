@@ -37,6 +37,7 @@ Play on a Minecraft Java server as a real Deadlock hero (first target: Celeste).
 | `courses/` | Structure-block exports for the feel test | M1 |
 | `spikes/collider-test/` | Throwaway plugin: can spawned boxes block the hero? | M4 spike |
 | `deadworks.version` | Pinned Deadworks release every C# project builds against | |
+| `deadworks.sha256` | SHA-256 of each pinned Deadworks zip (`<version> <sha256>`); `get-deadworks.ps1` won't extract a zip that doesn't match | |
 
 ## Setup from zero
 

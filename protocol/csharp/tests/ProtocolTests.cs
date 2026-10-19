@@ -109,6 +109,23 @@ public class ProtocolTests
 	}
 
 	[Fact]
+	public void ClampsAHostileCubeCount()
+	{
+		// Shared memory is writable by any process of the same user: a count past the ring is clamped, never trusted.
+		string name = $@"Local\DeadcraftTest_{Guid.NewGuid():N}";
+		using var mapping = Mapping.OpenOrCreate(name);
+		mapping.WriteMcState(new McState { Generation = 1 }, new List<Cube> { new() { Edge = 1 } });
+		using (var raw = System.IO.MemoryMappedFiles.MemoryMappedFile.OpenExisting(name))
+		using (var view = raw.CreateViewAccessor())
+			view.Write(McState.Offset + McState.CubeCountAt, uint.MaxValue);
+
+		var read = new List<Cube>();
+		Assert.True(mapping.TryReadMcState(0, out var state, read));
+		Assert.Equal(uint.MaxValue, state.CubeCount);
+		Assert.Equal(Proto.CubesCapacity, read.Count);
+	}
+
+	[Fact]
 	public void LapsTheAbilityRing()
 	{
 		using var mapping = Mapping.OpenOrCreate($@"Local\DeadcraftTest_{Guid.NewGuid():N}");

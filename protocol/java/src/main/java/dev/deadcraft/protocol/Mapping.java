@@ -233,7 +233,7 @@ public final class Mapping implements AutoCloseable {
 			VarHandle.acquireFence();
 			if ((before & 1) != 0) continue;
 			McState state = McState.read(copy(McState.OFFSET, McState.SIZE), 0);
-			int count = Math.min(state.cubeCount, Proto.CUBES_CAPACITY);
+			int count = cubesToRead(state.cubeCount);
 			ByteBuffer b = copy(Proto.CUBES_OFFSET, count * Cube.SIZE);
 			VarHandle.acquireFence();
 			if (view.get(INT, seqAt) != before) continue;
@@ -242,6 +242,14 @@ public final class Mapping implements AutoCloseable {
 			return Optional.of(new McSnapshot(state, cubes));
 		}
 		return Optional.empty();
+	}
+
+	/**
+	 * How many cubes to copy for a cube count read from shared memory: unsigned, so a count of 2^31 or more
+	 * (any process of the same user can write the block) is clamped to the ring, not read as negative.
+	 */
+	static int cubesToRead(int cubeCount) {
+		return Integer.compareUnsigned(cubeCount, Proto.CUBES_CAPACITY) > 0 ? Proto.CUBES_CAPACITY : cubeCount;
 	}
 
 	/** Milliseconds since the Deadlock side last wrote, by GetTickCount64 (the clock both sides use). */

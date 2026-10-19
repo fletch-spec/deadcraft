@@ -7,6 +7,10 @@
 # Installing only adds files to Deadlock (deadworks.exe, game\bin\win64\managed\,
 # game\citadel\cfg\deadworks_mem.jsonc). It refuses to overwrite a different Deadworks version
 # unless you pass -Force. Deadlock's own files are never touched.
+#
+# The zip's SHA-256 must match the line for its version in deadworks.sha256 ("<version> <sha256>"), or
+# nothing is extracted: release assets can be replaced. Pinning a new version means adding its line
+# (check it against the release's digest: gh api repos/Deadworks-net/deadworks/releases/tags/<version>).
 param(
     [string]$Version = (Get-Content (Join-Path $PSScriptRoot '..\deadworks.version') -Raw).Trim(),
     [string]$DeadlockDir = 'C:\Program Files (x86)\Steam\steamapps\common\Deadlock',
@@ -20,9 +24,18 @@ $dest = Join-Path $root ".deadworks\$Version"
 if (-not (Test-Path (Join-Path $dest 'game\bin\win64\deadworks.exe'))) {
     New-Item -ItemType Directory -Force $dest | Out-Null
     $zip = Join-Path $dest "deadworks-$Version.zip"
+    $pin = Get-Content (Join-Path $root 'deadworks.sha256') |
+        ForEach-Object { $f = -split $_; if ($f.Count -eq 2 -and $f[0] -eq $Version) { $f[1] } } |
+        Select-Object -First 1
+    if (-not $pin) { throw "No SHA-256 for Deadworks $Version in deadworks.sha256. Add its line first." }
     $url = "https://github.com/Deadworks-net/deadworks/releases/download/$Version/deadworks-$Version.zip"
     Write-Host "Downloading $url"
     Invoke-WebRequest $url -OutFile $zip
+    $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+    if ($hash -ne $pin) {
+        Remove-Item $zip
+        throw "deadworks-$Version.zip has SHA-256 $hash, expected $pin. Not extracting it."
+    }
     Expand-Archive $zip -DestinationPath $dest -Force
     Remove-Item $zip
 }

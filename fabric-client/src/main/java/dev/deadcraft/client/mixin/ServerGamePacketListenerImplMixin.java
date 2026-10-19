@@ -14,7 +14,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * Singleplayer only (the integrated server runs in this process): while the player follows the
  * Deadlock hero, Deadlock decides whether they're on the ground, and the server's check (a reported
  * on-ground with no downward collision, e.g. stepping up stairs) resends the chunk below and makes
- * it flash. The M5 server mod does the same for opted-in players on a dedicated server.
+ * it flash. Never port this as is: on a dedicated server any client could teleport. The M5 server mod
+ * trusts only opted-in players and caps each move (Deadlock's max speed plus a dash); see docs/STATUS.md.
  */
 @Mixin(ServerGamePacketListenerImpl.class)
 public abstract class ServerGamePacketListenerImplMixin {
