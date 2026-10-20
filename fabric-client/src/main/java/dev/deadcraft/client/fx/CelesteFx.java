@@ -377,11 +377,14 @@ public final class CelesteFx {
 		float[] clock = {0};
 		Ribbon lines = new Ribbon(() -> clock[0] > 0.25f ? null : body.get(), GLOW, 0.3f, 0.2f, LIGHT_BLUE, BLUE, 0.35f, 1.2f);
 		Vec3 front = at.add(dir.scale(2.2));
-		Ring wake = new Ring(front, dir, RING, 0.4f, 0.75f, 0.45f, WHITE, 0.55f, 1.2f, true);
+		// Short tubes of light round the dash's line, not flat cards (round 11), each over a faint soft ring.
+		Vfx wake = Vfx.group(new Ring(front, dir, RING, 0.4f, 0.75f, 0.45f, WHITE, 0.25f, 1, true),
+			new Hoop(front, dir, 0.45f, 0.8f, 0.22f, 0.45f, BEAM, WHITE, 0.6f, 1.3f, true));
 		Emitter smoke = new Emitter(new Emitter.Spec().texture(SMOKE).blended().burst(6).duration(0.01f).life(0.35f, 0.6f).size(0.18f, 0.35f)
 			.color(SMOKE_GREY, SMOKE_GREY).alpha(0.18f, 0.05f, 0.7f).velocityRandom(0.6f).drag(2).spawnRadius(0.5f).roll(3.1f, 0.5f), pack,
 			() -> front, null, seed + 2);
-		Ring ring = new Ring(at, dir, RING, 0.6f, 1.05f, 0.35f, PINK_VIOLET, 0.8f, 1.5f, true);
+		Vfx ring = Vfx.group(new Ring(at, dir, RING, 0.6f, 1.05f, 0.35f, PINK_VIOLET, 0.35f, 1.2f, true),
+			new Hoop(at, dir, 0.65f, 1.1f, 0.3f, 0.35f, BEAM, PINK_VIOLET, 0.8f, 1.5f, true));
 		Emitter stars = new Emitter(new Emitter.Spec().texture(SPARKLE).burst(5).duration(0.01f).life(0.4f, 0.7f).size(0.05f, 0.015f).color(PINK_VIOLET, VIOLET)
 			.alpha(1, 0.05f, 0.5f).brightness(2.5f).spawnRadius(0.6f).velocityRandom(0.3f).drag(2), pack, () -> at, null, seed + 1);
 		return Vfx.clocked(clock, Vfx.group(smoke, wake, ring, lines, stars));
