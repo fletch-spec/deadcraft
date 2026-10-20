@@ -117,6 +117,16 @@ public final class CelesteFx {
 	static final String DISC = "materials/particle/glows/glow_large_tight.vtex";
 	static final Vec3 UP = new Vec3(0, 1, 0);
 
+	/** Deadlock's metres in blocks (39.37 units a metre, 64 a block). */
+	static float metres(double m) {
+		return (float) (m * 39.37 / 64);
+	}
+
+	/** Plain white (bands of light). */
+	static final String WHITE_TEX = "materials/particle/status_fx/white.vtex";
+	static final float[] LAVENDER = {0.75f, 0.75f, 1.0f};
+	static final float[] SMOKE_GREY = {0.75f, 0.77f, 0.8f};
+
 	/** A colour round the rainbow, 0..1. */
 	static float[] hue(float h) {
 		float h6 = (h - (float) Math.floor(h)) * 6;
@@ -134,10 +144,14 @@ public final class CelesteFx {
 		return Vfx.clocked(clock, Vfx.group(line, glow));
 	}
 
+	/** Radiant Blast's reach and half its cone (abilities.vdata: 10 m, 70 degrees). */
+	static final float BLAST_RANGE = metres(10), BLAST_HALF_ANGLE = 35;
+
 	/**
-	 * Radiant Blast's cast (1), at the wand along {@code dir}: a fountain of glowing sparks arcing up and out, a
-	 * burst of purple sparkles and big pink stars, cyan streaks, a wide arc of light sweeping out ahead, and the
-	 * ground lit purple under her ({@code feet}).
+	 * Radiant Blast's cast (1), at the wand along {@code dir}: a burst of purple sparkles and big pink stars, cyan
+	 * streaks, the ground lit purple under her ({@code feet}) and a purple arc of light along the ground at the
+	 * cone's end. The fountain of sparks is its bullets ({@link #radiantDagger}), which scorch the ground where they
+	 * fall ({@link #radiantHit}).
 	 */
 	static Vfx radiantBlast(FxPack pack, Vec3 at, Vec3 dir, Vec3 feet, long seed) {
 		java.util.Random r = new java.util.Random(seed);
@@ -146,13 +160,10 @@ public final class CelesteFx {
 		Vec3 side = flat.cross(UP);
 		java.util.List<Vfx> parts = new java.util.ArrayList<>();
 		parts.add(new Ring(feet.add(0, 0.03, 0), UP, GLOW, 3, 3.5f, 0.8f, VIOLET, 0.45f, 1, true));
-		parts.add(new Band(feet, 2.2f, 4.5f, (float) (at.y - feet.y) - 0.2f, (float) (at.y - feet.y) - 0.1f, 0.4f, 0.5f, 0.7f,
-			Math.atan2(flat.z, flat.x), Math.toRadians(35), BEAM, new float[] {0.85f, 0.8f, 1}, 0.5f, 1, true));
+		double facing = Math.atan2(flat.z, flat.x);
+		parts.add(Vfx.after(0.25f, () -> new Band(feet, BLAST_RANGE * 0.8f, BLAST_RANGE, 0.05f, 0.02f, 0.35f, 0.3f, 0.9f, facing,
+			Math.toRadians(BLAST_HALF_ANGLE), BEAM, PINK_VIOLET, 0.8f, 1.5f, true)));
 		parts.add(Glow.flash(at, GLOW, 0.35f, VIOLET, 0.5f, 1, 0.4f, 1.2f));
-		for (int i = 0; i < 8; i++) {
-			Vec3 v = flat.scale(1.5 + r.nextDouble() * 2.5).add(side.scale((r.nextDouble() * 2 - 1) * 2.2)).add(0, 4 + r.nextDouble() * 2.5, 0);
-			parts.add(arcSpark(at, v, 9, 0.55f + r.nextFloat() * 0.25f, CYAN, LIGHT_BLUE, 0.012f));
-		}
 		parts.add(new Emitter(new Emitter.Spec().texture(SPARKLE).burst(30).duration(0.01f).life(0.4f, 0.8f).size(0.014f, 0.004f)
 			.color(PINK_VIOLET, VIOLET).alpha(1, 0, 0.5f).brightness(3).velocity(dir.x * 3, dir.y * 3, dir.z * 3, 2.5f).drag(2).roll(0.4f, 3), pack,
 			() -> at, null, seed + 1));
@@ -165,12 +176,15 @@ public final class CelesteFx {
 		return Vfx.group(parts.toArray(new Vfx[0]));
 	}
 
-	/** One of Radiant Blast's bullets in flight: a thin cyan streak. */
+	/** One of Radiant Blast's bullets arcing out (the recording's fountain): a glowing cyan head on a thin trail. */
 	static Vfx radiantDagger(FxPack pack, Supplier<Vec3> bullet, long seed) {
-		Ribbon trail = new Ribbon(bullet, BEAM, 0.012f, 0.04f, CYAN, VIOLET, 0.9f, 2.5f);
-		Glow head = Glow.steady(bullet, GLOW, 0.025f, CYAN, 1, 3, 0.1f);
+		Ribbon trail = new Ribbon(bullet, BEAM, 0.012f, 0.25f, WHITE_BLUE, LIGHT_BLUE, 0.9f, 2);
+		Glow head = Glow.steady(bullet, GLOW, 0.045f, CYAN, 1, 3, 0.1f);
 		return Vfx.group(trail, head);
 	}
+
+	/** How long Radiant Blast's ground burns (abilities.vdata: 8 s). */
+	static final float BLAST_BURN_S = 8;
 
 	/** Where a Radiant Blast bullet lands: a small pink-white pop. */
 	static Vfx radiantHit(FxPack pack, Vec3 at, Vec3 normal, long seed) {
@@ -180,34 +194,35 @@ public final class CelesteFx {
 		Emitter sparkles = new Emitter(new Emitter.Spec().texture(SPARKLE).burst(5).duration(0.01f).life(0.25f, 0.5f).size(0.012f, 0.003f)
 			.color(PINK_VIOLET, VIOLET).alpha(1, 0, 0.5f).brightness(3).velocity(normal.x, normal.y, normal.z, 1).drag(2.5f).roll(0.4f, 3), pack,
 			() -> p, null, seed);
-		return Vfx.group(tint, sparkles, core);
+		// The scorch it leaves while the blast burns (the recording: a dark fan over the cone).
+		Ring scorch = new Ring(at.add(normal.scale(0.015)), normal, DISC, 0.9f, 1.1f, BLAST_BURN_S, DUSK, 0.45f, 1, false).hold(0.8f);
+		return Vfx.group(scorch, tint, sparkles, core);
 	}
 
-	/** How long Prismatic Guard's bubble lasts, seconds (the recording: about 3.5). */
-	static final float GUARD_S = 3.5f;
+	/** How long Prismatic Guard's bubble lasts, seconds (abilities.vdata: 4). */
+	static final float GUARD_S = 4;
 
 	/**
-	 * Prismatic Guard (2): a crystal bubble round her for {@link #GUARD_S}: a soft blue rim and fill, crystal facets
-	 * in rainbow tints, two ribbons circling her; at the start a starburst and rainbow arcs at the horn and a burst
-	 * of white sparkles.
+	 * Prismatic Guard (2): a faint glass bubble round her for {@link #GUARD_S}: a soft rim and fill, crystal facets
+	 * in rainbow tints, wide lavender bands circling her middle; at the start a starburst and rainbow arcs at the horn
+	 * and a burst of white sparkles.
 	 */
 	static Vfx prismaticGuard(FxPack pack, Supplier<Vec3> horn, Supplier<Vec3> body, long seed) {
 		float[] clock = {0};
 		Supplier<Vec3> bubble = () -> clock[0] > GUARD_S ? null : body.get();
-		Glow rim = Glow.steady(bubble, LENS, 1.15f, LIGHT_BLUE, 0.25f, 1, 0.02f).frame(pack, 3);
-		Glow fill = Glow.steady(bubble, GLOW, 1.2f, BLUE, 0.12f, 1, 0.03f);
+		Glow rim = Glow.steady(bubble, LENS, 1.15f, LIGHT_BLUE, 0.12f, 1, 0.02f).frame(pack, 3);
+		Glow fill = Glow.steady(bubble, GLOW, 1.2f, BLUE, 0.07f, 1, 0.03f);
 		Emitter facets = new Emitter(new Emitter.Spec().texture(SHARD).rainbow().local().rate(14).duration(GUARD_S - 0.5f).life(0.6f, 1).size(0.12f, 0.06f)
 			.alpha(0.35f, 0.2f, 0.5f).brightness(1).spawnRadius(0.95f).roll(3.1f, 0.5f), pack, body, null, seed);
-		Vfx[] orbits = new Vfx[2];
-		for (int k = 0; k < 2; k++) {
-			double tilt = k == 0 ? 0.35 : -0.5, speed = k == 0 ? 4.2 : -3.4, phase = k * 2.1;
-			Supplier<Vec3> o = () -> {
-				Vec3 c = bubble.get();
-				if (c == null) return null;
-				double a = clock[0] * speed + phase;
-				return c.add(Math.cos(a) * 0.95, Math.sin(a) * 0.95 * tilt - 0.2, Math.sin(a) * 0.95);
-			};
-			orbits[k] = new Ribbon(o, BEAM, 0.05f, 0.3f, WHITE, LIGHT_BLUE, 0.7f, 1.5f);
+		// Wide translucent bands turning round her middle, each with a bright edge.
+		Vfx[] orbits = new Vfx[6];
+		float[][] bands = {{-0.6f, 2.6f, 0}, {-0.15f, -2.1f, 2.2f}, {0.3f, 1.7f, 4.1f}};
+		for (int k = 0; k < 3; k++) {
+			float y = bands[k][0], spin = bands[k][1];
+			double phase = bands[k][2];
+			orbits[k * 2] = new Band(bubble, 0.95f, 0.95f, y, y, 0.26f, 0, GUARD_S, phase, 1.1, WHITE_TEX, LAVENDER, 0.4f, 1, false).spin(spin);
+			orbits[k * 2 + 1] = new Band(bubble, 0.96f, 0.96f, y + 0.22f, y + 0.22f, 0.05f, 0, GUARD_S, phase, 1.1, BEAM, WHITE, 0.7f, 1.5f, true)
+				.spin(spin);
 		}
 		Glow star = Glow.flash(horn, FLARE, 0.35f, WHITE_BLUE, 1, 2, 0.6f, 1.4f);
 		Glow rainbow = Glow.flash(() -> {
@@ -216,16 +231,16 @@ public final class CelesteFx {
 		}, LENS, 1.6f, WHITE, 0.7f, 1.2f, 1.2f, 1.1f).frame(pack, 1);
 		Emitter burst = new Emitter(new Emitter.Spec().texture(SPARKLE).burst(24).duration(0.01f).life(0.4f, 0.8f).size(0.05f, 0.02f).color(WHITE, PINK_VIOLET)
 			.alpha(1, 0, 0.5f).brightness(3).spawnRadius(1).velocityRandom(0.8f).drag(2), pack, body, null, seed + 1);
-		return Vfx.clocked(clock, Vfx.group(fill, facets, orbits[0], orbits[1], rim, rainbow, burst, star));
+		return Vfx.clocked(clock, Vfx.group(fill, facets, Vfx.group(orbits), rim, rainbow, burst, star));
 	}
 
-	/** Luminous Strike's area round her (blocks) and the wait before it strikes (seconds): from the recording. */
-	static final float STRIKE_RADIUS = 4.5f, STRIKE_DELAY_S = 1.5f;
+	/** Luminous Strike's reach, area (blocks) and wait before it strikes (abilities.vdata: 30 m, 8 m, 1.4 s). */
+	static final float STRIKE_RANGE = metres(30), STRIKE_RADIUS = metres(8), STRIKE_DELAY_S = 1.4f;
 
 	/**
-	 * Luminous Strike (3), round {@code centre} (her feet when cast): a beam into the sky from the horn with a ring
-	 * and rainbow arcs about her head; a darkened circle whose purple rim drops onto the ground, a spiral coming
-	 * down, stars rising inside it; then the strike: pillars of light from the sky all over it, a rainbow curtain,
+	 * Luminous Strike (3), round {@code centre} (where she aimed, within its reach): a beam into the sky from the
+	 * horn with a ring, rainbow arcs and a spiral about her; a darkened circle whose purple rim drops onto the
+	 * ground, stars rising inside it; then the strike: pillars of light from the sky all over it, a rainbow curtain,
 	 * purple flames round the edge, the circle lit purple and sparkles thrown up. {@code right}: the camera's right,
 	 * which the curtain lies along.
 	 */
@@ -245,7 +260,7 @@ public final class CelesteFx {
 			float t = clock[0];
 			if (t > 0.6f) return null;
 			double f = t / 0.6, a = t * 14, rr = 0.7 * (1 - f) + 0.2;
-			return centre.add(Math.cos(a) * rr, 12 * (1 - f) + 0.2, Math.sin(a) * rr);
+			return h0.add(Math.cos(a) * rr, 12 * f - 1.4, Math.sin(a) * rr);
 		}, BEAM, 0.04f, 0.3f, PINK_VIOLET, VIOLET, 0.9f, 2));
 		parts.add(new Emitter(new Emitter.Spec().texture(SPARKLE).disc(R * 0.95f).rate(20).duration(STRIKE_DELAY_S).life(0.5f, 0.9f).size(0.04f, 0.01f)
 			.color(VIOLET, LIGHT_BLUE).alpha(1, 0.2f, 0.5f).brightness(2.5f).velocity(0, 0.6, 0, 0.1f), pack, () -> centre, null, seed));
@@ -318,26 +333,38 @@ public final class CelesteFx {
 	// ---- movement ---------------------------------------------------------------------------------
 
 	/**
-	 * A dash along {@code dir}. In the air (the recording): a purple ring round her across the dash, white speed
-	 * lines left behind and purple stars. On the ground only faint lines.
+	 * A dash along {@code dir}. In the air (the recordings): a purple ring round her across the dash, white speed
+	 * lines and a smoky white ring ahead of her, purple stars. On the ground only faint lines.
 	 */
 	static Vfx dash(FxPack pack, Supplier<Vec3> body, Vec3 dir, boolean air, long seed) {
-		Vec3 at = body.get();
-		Emitter lines = new Emitter(new Emitter.Spec().texture(BEAM).burst(air ? 12 : 6).duration(0.01f).life(0.25f, 0.35f).size(0.012f, 0.006f).stretch(6)
+		Vec3 at = body.get(), ahead = at.add(dir.scale(1.2));
+		Emitter lines = new Emitter(new Emitter.Spec().texture(BEAM).burst(air ? 14 : 6).duration(0.01f).life(0.25f, 0.35f).size(0.012f, 0.006f).stretch(6)
 			.color(WHITE, WHITE_BLUE).alpha(air ? 0.6f : 0.35f, 0, 0.6f).brightness(1.5f).velocity(dir.x * 0.5, dir.y * 0.5, dir.z * 0.5, 0)
-			.spawnRadius(0.5f).orient(Emitter.Orient.STREAK), pack, () -> at, null, seed);
+			.spawnRadius(0.5f).orient(Emitter.Orient.STREAK), pack, () -> air ? ahead : at, null, seed);
 		if (!air) return lines;
+		Vec3 front = at.add(dir.scale(2.2));
+		Ring wake = new Ring(front, dir, RING, 0.4f, 0.75f, 0.45f, WHITE, 0.8f, 1.2f, true);
+		Emitter smoke = new Emitter(new Emitter.Spec().texture(SMOKE).blended().burst(8).duration(0.01f).life(0.4f, 0.7f).size(0.25f, 0.5f)
+			.color(SMOKE_GREY, SMOKE_GREY).alpha(0.35f, 0.05f, 0.7f).velocityRandom(0.6f).drag(2).spawnRadius(0.5f).roll(3.1f, 0.5f), pack,
+			() -> front, null, seed + 2);
 		Ring ring = new Ring(at, dir, RING, 0.6f, 1.05f, 0.35f, PINK_VIOLET, 0.8f, 1.5f, true);
 		Emitter stars = new Emitter(new Emitter.Spec().texture(SPARKLE).burst(5).duration(0.01f).life(0.4f, 0.7f).size(0.05f, 0.015f).color(PINK_VIOLET, VIOLET)
 			.alpha(1, 0.05f, 0.5f).brightness(2.5f).spawnRadius(0.6f).velocityRandom(0.3f).drag(2), pack, () -> at, null, seed + 1);
-		return Vfx.group(ring, lines, stars);
+		return Vfx.group(smoke, wake, ring, lines, stars);
 	}
 
-	/** A jump (the recording): a cyan puff and swirl ring at her feet and light streaks shooting up. */
-	static Vfx jump(FxPack pack, Vec3 feet, long seed) {
-		Emitter puff = new Emitter(new Emitter.Spec().texture(SMOKE).burst(10).duration(0.01f).life(0.3f, 0.5f).size(0.2f, 0.4f).color(CYAN, BLUE)
-			.alpha(0.4f, 0.05f, 0.7f).brightness(1).velocityRandom(0.8f).drag(3).spawnRadius(0.3f).roll(3.1f, 1), pack, () -> feet, null, seed);
-		Ring swirl = new Ring(feet.add(0, 0.05, 0), UP, RING, 0.2f, 0.9f, 0.35f, CYAN, 0.7f, 1.5f, true);
+	/**
+	 * A jump (the recordings): a grey smoke puff and a cyan swirl ring at her feet and light streaks shooting up;
+	 * in the air, a stack of cyan rings under her instead of the ground ring.
+	 */
+	static Vfx jump(FxPack pack, Vec3 feet, boolean air, long seed) {
+		Emitter puff = new Emitter(new Emitter.Spec().texture(SMOKE).blended().burst(10).duration(0.01f).life(0.3f, 0.6f).size(0.2f, 0.45f)
+			.color(SMOKE_GREY, SMOKE_GREY).alpha(0.35f, 0.05f, 0.7f).velocityRandom(0.8f).drag(3).spawnRadius(0.3f).roll(3.1f, 1), pack, () -> feet,
+			null, seed);
+		Vfx swirl = air ? Vfx.group(new Ring(feet, UP, RING, 0.3f, 0.5f, 0.35f, CYAN, 0.8f, 1.5f, true),
+			new Ring(feet.add(0, -0.3, 0), UP, RING, 0.3f, 0.5f, 0.3f, CYAN, 0.6f, 1.5f, true),
+			new Ring(feet.add(0, -0.6, 0), UP, RING, 0.3f, 0.5f, 0.25f, CYAN, 0.4f, 1.5f, true))
+			: new Ring(feet.add(0, 0.05, 0), UP, RING, 0.2f, 0.9f, 0.35f, CYAN, 0.7f, 1.5f, true);
 		Emitter streaks = new Emitter(new Emitter.Spec().texture(BEAM).burst(6).duration(0.01f).life(0.15f, 0.25f).size(0.015f, 0.008f).stretch(10)
 			.color(WHITE, CYAN).alpha(0.5f, 0, 0.6f).brightness(1.5f).velocity(0, 4, 0, 0.3f).spawnRadius(0.4f).orient(Emitter.Orient.UP), pack,
 			() -> feet, null, seed + 1);

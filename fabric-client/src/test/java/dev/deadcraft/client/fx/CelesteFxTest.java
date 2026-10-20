@@ -101,7 +101,7 @@ class CelesteFxTest {
 			// 9 blocks wide.
 			rows(pack, "orb_burst", c -> CelesteFx.orbBurst(pack, o, new Vec3(1, 0, 0), 11), o, new float[] {0.03f, 0.1f, 0.2f, 0.35f, 0.6f}, 0.45f);
 			rows(pack, "air_dash", c -> CelesteFx.dash(pack, () -> o, new Vec3(0, 0, 1), true, 12), o, new float[] {0.03f, 0.1f, 0.2f, 0.3f, 0.4f}, 0.9f);
-			rows(pack, "jump", c -> CelesteFx.jump(pack, new Vec3(0, -0.4, 0), 13), o, new float[] {0.03f, 0.08f, 0.15f, 0.25f, 0.4f}, 0.9f);
+			rows(pack, "jump", c -> CelesteFx.jump(pack, new Vec3(0, -0.4, 0), true, 13), o, new float[] {0.03f, 0.08f, 0.15f, 0.25f, 0.4f}, 0.9f);
 		}
 	}
 
@@ -129,11 +129,13 @@ class CelesteFxTest {
 			Vec3 o = Vec3.ZERO, x = new Vec3(1, 0, 0), up = new Vec3(0, 1, 0);
 			Vfx[] all = {CelesteFx.radiantBlast(pack, o, x, o, 1), CelesteFx.radiantHit(pack, o, up, 2), CelesteFx.prismaticGuard(pack, () -> o, () -> o, 3),
 				CelesteFx.luminousStrike(pack, () -> o, o, RIGHT, 4), CelesteFx.orbBurst(pack, o, up, 5), CelesteFx.dash(pack, () -> o, x, true, 6),
-				CelesteFx.dash(pack, () -> o, x, false, 7), CelesteFx.jump(pack, o, 8)};
+				CelesteFx.dash(pack, () -> o, x, false, 7), CelesteFx.jump(pack, o, false, 8)};
 			for (Vfx v : all) {
 				float t = 0;
-				while (v.tick(1 / 60f) && t < 6) t += 1 / 60f;
-				assertTrue(t < 4.5f, v + " over in " + t + " s, effect " + java.util.Arrays.asList(all).indexOf(v));
+				while (v.tick(1 / 60f) && t < 10) t += 1 / 60f;
+				// A Radiant Blast hit leaves its scorch while the blast burns.
+				float limit = v == all[1] ? CelesteFx.BLAST_BURN_S + 0.5f : 4.5f;
+				assertTrue(t < limit, "effect " + java.util.Arrays.asList(all).indexOf(v) + " over in " + t + " s");
 			}
 			boolean[] held = {true};
 			Vfx charge = CelesteFx.orbCharge(pack, () -> held[0] ? o : null, () -> held[0] ? up : null, 8);

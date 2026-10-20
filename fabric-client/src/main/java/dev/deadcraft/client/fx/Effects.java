@@ -448,11 +448,10 @@ public final class Effects {
 	// ---- Celeste's abilities and movement (hand-built) -----------------------------------------------
 
 	/**
-	 * The thrown orb: lobbed along her aim at this speed (blocks/s), a little upward, falling under this gravity
-	 * (blocks/s/s), for at most this far (blocks). Guesses matched to the recording (it lands about 6 blocks out
-	 * from a level throw); the plugin doesn't send the orb.
+	 * The thrown orb: straight along her aim at 2000 units/s with no gravity (abilities.vdata,
+	 * ability_unicorn_dazzlingorb), for at most this far (blocks: a guess; the plugin doesn't send the orb).
 	 */
-	private static final double ORB_SPEED = 18, ORB_LIFT = 3, ORB_GRAVITY = 20, ORB_RANGE = 40;
+	private static final double ORB_SPEED = 2000 / 64.0, ORB_LIFT = 0, ORB_GRAVITY = 0, ORB_RANGE = 60;
 	private static final java.util.Set<String> abilitiesLogged = new java.util.HashSet<>();
 
 	private static long nextSeed() {
@@ -477,8 +476,9 @@ public final class Effects {
 			played = "Prismatic Guard";
 		} else if (n.contains("luminousstrike")) {
 			var left = Minecraft.getInstance().gameRenderer.mainCamera().leftVector();
-			play(CelesteFx.luminousStrike(p, horn, feet, new Vec3(-left.x(), 0, -left.z()).normalize(), nextSeed()));
-			played = "Luminous Strike round her";
+			Vec3 target = aimTarget(feet, CelesteFx.STRIKE_RANGE);
+			play(CelesteFx.luminousStrike(p, horn, target, new Vec3(-left.x(), 0, -left.z()).normalize(), nextSeed()));
+			played = String.format("Luminous Strike %.1f blocks away", target.distanceTo(feet));
 		} else if (n.contains("dazzlingorb")) {
 			played = "nothing (the orb charges while channelling and flies when let go)";
 		} else if (n.contains("ability_dash")) {
@@ -489,7 +489,7 @@ public final class Effects {
 			if (heroGrounded) blockDust(feet, 10, dir, 0.12);
 			played = heroGrounded ? "ground dash" : "air dash";
 		} else if (n.contains("ability_jump")) {
-			play(CelesteFx.jump(p, feet, nextSeed()));
+			play(CelesteFx.jump(p, feet, airTime > AIR_JUMP_S, nextSeed()));
 			if (airTime > AIR_JUMP_S) {
 				played = "air jump";
 			} else {
@@ -641,6 +641,22 @@ public final class Effects {
 	private static Vec3 aimDirection() {
 		var f = Minecraft.getInstance().gameRenderer.mainCamera().forwardVector();
 		return new Vec3(f.x(), f.y(), f.z()).normalize();
+	}
+
+	/**
+	 * Where the crosshair's ray first meets a block, brought back to within {@code range} of {@code feet}
+	 * (horizontally) if further, then dropped onto the ground below.
+	 */
+	private static Vec3 aimTarget(Vec3 feet, double range) {
+		var mc = Minecraft.getInstance();
+		Vec3 eye = mc.gameRenderer.mainCamera().position(), end = eye.add(aimDirection().scale(range + 8));
+		if (mc.level == null) return feet;
+		HitResult hit = mc.level.clip(new ClipContext(eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+		Vec3 t = hit.getType() != HitResult.Type.MISS ? hit.getLocation() : end;
+		Vec3 flat = new Vec3(t.x - feet.x, 0, t.z - feet.z);
+		if (flat.length() > range) t = new Vec3(feet.x, t.y, feet.z).add(flat.normalize().scale(range));
+		HitResult down = mc.level.clip(new ClipContext(t.add(0, 1, 0), t.add(0, -40, 0), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+		return down.getType() != HitResult.Type.MISS ? down.getLocation() : t;
 	}
 
 	// ---- per frame -------------------------------------------------------------------------------

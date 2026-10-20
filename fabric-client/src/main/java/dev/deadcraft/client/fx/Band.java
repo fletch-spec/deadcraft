@@ -1,5 +1,6 @@
 package dev.deadcraft.client.fx;
 
+import java.util.function.Supplier;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -10,7 +11,10 @@ import net.minecraft.world.phys.Vec3;
  */
 public final class Band implements Vfx {
 	private static final int SEGMENTS = 40;
-	private final Vec3 centre;
+	private final Supplier<Vec3> centre;
+	private Vec3 at;
+	/** Radians a second the arc turns round its centre. */
+	private float spin;
 	private final float r0, r1, y0, y1, height, moveS, duration, alpha, brightness;
 	/** The arc's middle (radians round from +x towards +z) and half its angle (PI: all the way round). */
 	private final double facing, half;
@@ -22,6 +26,12 @@ public final class Band implements Vfx {
 	private final int[] argb = new int[4];
 
 	public Band(Vec3 centre, float r0, float r1, float y0, float y1, float height, float moveS, float duration, double facing, double half,
+		String texture, float[] color, float alpha, float brightness, boolean additive) {
+		this(() -> centre, r0, r1, y0, y1, height, moveS, duration, facing, half, texture, color, alpha, brightness, additive);
+	}
+
+	/** A band round a moving centre (round her body); it ends early if the centre goes away. */
+	public Band(Supplier<Vec3> centre, float r0, float r1, float y0, float y1, float height, float moveS, float duration, double facing, double half,
 		String texture, float[] color, float alpha, float brightness, boolean additive) {
 		this.centre = centre;
 		this.r0 = r0;
@@ -40,9 +50,18 @@ public final class Band implements Vfx {
 		this.additive = additive;
 	}
 
+	/** Turns the arc round its centre, radians a second. */
+	public Band spin(float radiansPerSecond) {
+		spin = radiansPerSecond;
+		return this;
+	}
+
 	@Override
 	public boolean tick(float dt) {
 		time += dt;
+		Vec3 c = centre.get();
+		if (c == null) return false;
+		at = c;
 		return time < duration;
 	}
 
@@ -53,8 +72,9 @@ public final class Band implements Vfx {
 		float r = r0 + (r1 - r0) * ease, y = y0 + (y1 - y0) * ease;
 		float t = time / duration;
 		float a = alpha * (t < 0.75f ? 1 : (1 - t) / 0.25f);
-		if (a <= 0.002f || r <= 0) return;
-		double cx = centre.x - eye.x, cy = centre.y - eye.y, cz = centre.z - eye.z;
+		if (a <= 0.002f || r <= 0 || at == null) return;
+		double cx = at.x - eye.x, cy = at.y - eye.y, cz = at.z - eye.z;
+		double facing = this.facing + spin * time;
 		// Partial arcs fade at their ends.
 		boolean full = half >= Math.PI - 1e-3;
 		for (int i = 0; i < SEGMENTS; i++) {

@@ -349,11 +349,32 @@ public final class Follow {
 	/** Bullets are traced this far, blocks. */
 	private static final double SHOT_RANGE = 128;
 	/**
-	 * Ability bullets (Radiant Blast's cone: 12 of them, spread up to 33 deg and down into the ground) reach
-	 * this far, blocks: the blast's 779 units (its effect's length). Traced 128 blocks, their hits landed far
-	 * off and around her. Celeste's only bullet ability; other heroes' differ.
+	 * Ability bullets (Radiant Blast's cone: 12 of them, spread up to 33 deg): 2500 units/s with gravity scale 4
+	 * (abilities.vdata, ability_unicorn_radiantblast), so they arc up and fall in the cone: the fountain of sparks
+	 * in Deadlock's recording. Celeste's only bullet ability; other heroes' differ.
 	 */
-	private static final double ABILITY_RANGE = 779 / 64.0;
+	private static final double BLAST_SPEED = 2500 / 64.0, BLAST_GRAVITY = 4 * 800 / 64.0, BLAST_LIFETIME = 1.5;
+	/**
+	 * A ricochet keeps this much of its speed at least (abilities.vdata, citadel_weapon_unicorn_set:
+	 * m_flRicochetDotMinDampening 0.25); more the more glancing the hit: the dot of its new direction with the
+	 * bullet's on the way in (taken as Deadlock's rule: unverified).
+	 */
+	private static final double RICOCHET_MIN_KEEP = 0.25;
+	/** Recent gun hits (point, direction in, when): a ricochet starts at one of them. */
+	private record GunHit(net.minecraft.world.phys.Vec3 at, net.minecraft.world.phys.Vec3 in, long nanos) {}
+	private static final java.util.ArrayDeque<GunHit> gunHits = new java.util.ArrayDeque<>();
+
+	/** How much speed a ricochet leaving {@code from} along {@code dir} keeps, from the gun hit it starts at. */
+	private static double ricochetKeep(net.minecraft.world.phys.Vec3 from, net.minecraft.world.phys.Vec3 dir) {
+		GunHit best = null;
+		long now = System.nanoTime();
+		for (GunHit h : gunHits) {
+			if (now - h.nanos() > 3_000_000_000L) continue;
+			if (best == null || h.at().distanceToSqr(from) < best.at().distanceToSqr(from)) best = h;
+		}
+		if (best == null || best.at().distanceTo(from) > 3) return 0.5;  // no hit to go by
+		return Math.max(RICOCHET_MIN_KEEP, dir.dot(best.in()));
+	}
 	/**
 	 * Celeste's bullets (Deadlock's scripts/abilities.vdata, citadel_weapon_unicorn_set): 1968.5 units/s,
 	 * gravity scale 0.2, 5 s lifetime. Deadlock's gravity is taken as Source's default 800 units/s/s
@@ -407,16 +428,16 @@ public final class Follow {
 		// The bullet's flight: Celeste's drop under gravity, in short straight steps through Minecraft's blocks.
 		var p = from;
 		boolean bullet = gun || ricochet;
-		var v = dir.scale(bullet ? BULLET_SPEED : SHOT_RANGE);
+		double keep = ricochet ? ricochetKeep(from, dir) : 1;
+		if (ricochet && abilityShotLogs <= 12) LOG.info("Deadcraft: ricochet keeps {} of its speed", String.format("%.2f", keep));
+		var v = dir.scale(bullet ? BULLET_SPEED * keep : BLAST_SPEED);
 		double step = 1 / 30.0, travelled = 0;
 		HitResult hit = null;
 		var path = new java.util.ArrayList<net.minecraft.world.phys.Vec3>();
 		path.add(from);
-		double range = bullet ? SHOT_RANGE : ABILITY_RANGE;
-		for (double t = 0; t < (bullet ? BULLET_LIFETIME : 1) && travelled < range; t += step) {
+		for (double t = 0; t < (bullet ? BULLET_LIFETIME : BLAST_LIFETIME) && travelled < SHOT_RANGE; t += step) {
 			var next = p.add(v.scale(step));
-			if (bullet) v = v.add(0, -BULLET_GRAVITY * step, 0);
-			if (!bullet && travelled + next.distanceTo(p) > range) next = p.add(next.subtract(p).normalize().scale(range - travelled));
+			v = v.add(0, -(bullet ? BULLET_GRAVITY : BLAST_GRAVITY) * step, 0);
 			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
 			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
 			travelled += end.distanceTo(p);
@@ -426,6 +447,11 @@ public final class Follow {
 		}
 		boolean landed = hit instanceof BlockHitResult b && hit.getType() != HitResult.Type.MISS;
 		var normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : null;
+		if (bullet && landed && path.size() >= 2) {
+			var in = path.get(path.size() - 1).subtract(path.get(path.size() - 2));
+			if (in.lengthSqr() > 1e-8) gunHits.addLast(new GunHit(hit.getLocation(), in.normalize(), System.nanoTime()));
+			while (gunHits.size() > 16) gunHits.removeFirst();
+		}
 		// Deadlock's own effects for the hero's weapon when exported (hero-export --fx), else Minecraft particles.
 		String weapon = bullet ? Effects.weaponName() : Effects.bulletAbilityName();
 		var muzzle = ricochet ? null : Effects.attachmentWorld("weapon_top_fx");

@@ -14,6 +14,7 @@ namespace Deadcraft.HeroExport;
 /// Packs a hero's visual effects for the Minecraft client (fabric-client's dev.deadcraft.client.fx), from
 /// the player's own Deadlock install; never committed. A zip (&lt;hero&gt;.dcfx) holding:
 /// <code>
+/// abilities.txt         every setting of each of the hero's abilities ("ability &lt;name&gt;", then "path value" lines)
 /// manifest.txt          "version 1", "scale &lt;f&gt;" (the model's particle scale),
 ///                       "effect &lt;ability&gt; &lt;key&gt; &lt;path&gt;" for every effect the hero's abilities name
 ///                       (Celeste's gun: citadel_weapon_unicorn_set m_szBulletTravelTracerParticle ...),
@@ -80,6 +81,7 @@ internal static class FxPack
 		}
 
 		// The hero's abilities, from heroes.vdata, and every effect they name in abilities.vdata.
+		var abilitySettings = new StringBuilder();
 		var heroes = Data(loader, "scripts/heroes.vdata");
 		var abilities = Data(loader, "scripts/abilities.vdata");
 		if (heroes.TryGetValue("hero_" + hero, out var heroData) && heroData.TryGetValue("m_mapBoundAbilities", out var bound))
@@ -88,6 +90,9 @@ internal static class FxPack
 			{
 				string abilityName = (string)ability;
 				if (!abilities.TryGetValue(abilityName, out var abilityData)) continue;
+				// Every setting of the ability (ranges, radii, durations, the gun's ricochet), for the client's effects.
+				abilitySettings.Append("ability ").Append(abilityName).AppendLine();
+				foreach (var line in Settings(abilityData, "")) abilitySettings.AppendLine(line);
 				foreach (var (key, path) in EffectsIn(abilityData, ""))
 				{
 					manifest.Append($"effect {abilityName} {key} {path}\n");
@@ -136,6 +141,7 @@ internal static class FxPack
 		using (var zip = ZipFile.Open(tmp, ZipArchiveMode.Create))
 		{
 			Text(zip, "manifest.txt", manifest.ToString());
+			Text(zip, "abilities.txt", abilitySettings.ToString());
 			Text(zip, "attachments.txt", attachments.ToString());
 			Text(zip, "bones.txt", bones.ToString());
 			int written = 0;
@@ -173,6 +179,26 @@ internal static class FxPack
 			{
 				string value = (string)child;
 				if (value.EndsWith(".vpcf", StringComparison.Ordinal)) yield return (name, value);
+			}
+		}
+	}
+
+	/** "path value" for every plain value under {@code node} (nested keys joined with dots). */
+	private static IEnumerable<string> Settings(KVObject node, string prefix)
+	{
+		if (!node.IsCollection && !node.IsArray) yield break;
+		int index = 0;
+		foreach (var (key, child) in node.Children)
+		{
+			string name = prefix.Length == 0 ? key ?? index.ToString() : prefix + "." + (key ?? index.ToString());
+			index++;
+			if (child.IsCollection || child.IsArray)
+			{
+				foreach (var line in Settings(child, name)) yield return line;
+			}
+			else
+			{
+				yield return name + " " + child;
 			}
 		}
 	}
