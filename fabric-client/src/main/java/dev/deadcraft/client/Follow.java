@@ -102,6 +102,7 @@ public final class Follow {
 	public static void beginFrame() {
 		Minecraft mc = Minecraft.getInstance();
 		MobDamage.tick(mc);
+		runLaters();
 		LocalPlayer player = mc.player;
 		Optional<HeroState> state = enabled && player != null ? readHero() : Optional.empty();
 		long now = System.currentTimeMillis();
@@ -370,25 +371,150 @@ public final class Follow {
 	 */
 	private static final double BLAST_SPEED = 2500 / 64.0, BLAST_GRAVITY = 4 * 800 / 64.0, BLAST_LIFETIME = 1.5;
 	/**
-	 * A ricochet keeps this much of its speed at least (abilities.vdata, citadel_weapon_unicorn_set:
-	 * m_flRicochetDotMinDampening 0.25); more the more glancing the hit: the dot of its new direction with the
-	 * bullet's on the way in (taken as Deadlock's rule: unverified).
+	 * Celeste's ricochet (abilities.vdata, citadel_weapon_unicorn_set): a bullet that hits bounces once towards a
+	 * living mob within m_flRicochetConeAngle (30 degrees, taken as the half angle: unverified) of where it would
+	 * glance off (the reflection off a block; straight on through a mob it hit), within RICOCHET_RANGE blocks (a guess:
+	 * the data doesn't say), in sight of the hit. It keeps max(m_flRicochetDotMinDampening 0.25, dot(out, in)) of its
+	 * speed (head-on bounces lose most of it) and homes in on the mob as it flies ("tracking"). No mob: no bounce.
+	 * Deadlock's own ricochets head for its targets, so they aren't drawn.
 	 */
-	private static final double RICOCHET_MIN_KEEP = 0.25;
-	/** Recent gun hits (point, direction in, when): a ricochet starts at one of them. */
-	private record GunHit(net.minecraft.world.phys.Vec3 at, net.minecraft.world.phys.Vec3 in, long nanos) {}
-	private static final java.util.ArrayDeque<GunHit> gunHits = new java.util.ArrayDeque<>();
+	private static final double RICOCHET_COS = Math.cos(Math.toRadians(30)), RICOCHET_RANGE = 15, RICOCHET_MIN_KEEP = 0.25;
+	private static final double STEP_S = 1 / 30.0;
 
-	/** How much speed a ricochet leaving {@code from} along {@code dir} keeps, from the gun hit it starts at. */
-	private static double ricochetKeep(net.minecraft.world.phys.Vec3 from, net.minecraft.world.phys.Vec3 dir) {
-		GunHit best = null;
-		long now = System.nanoTime();
-		for (GunHit h : gunHits) {
-			if (now - h.nanos() > 3_000_000_000L) continue;
-			if (best == null || h.at().distanceToSqr(from) < best.at().distanceToSqr(from)) best = h;
+	/** A traced bullet: its points ({@link #STEP_S} apart), what it hit, how far it flew. */
+	private record Trace(java.util.List<net.minecraft.world.phys.Vec3> path, HitResult hit, net.minecraft.world.entity.Entity mob, double travelled) {
+		boolean landed() {
+			return mob == null && hit instanceof BlockHitResult && hit.getType() != HitResult.Type.MISS;
 		}
-		if (best == null || best.at().distanceTo(from) > 3) return 0.5;  // no hit to go by
-		return Math.max(RICOCHET_MIN_KEEP, dir.dot(best.in()));
+
+		double seconds() {
+			return STEP_S * (path.size() - 1);
+		}
+
+		/** The direction it arrived in. */
+		net.minecraft.world.phys.Vec3 in(net.minecraft.world.phys.Vec3 fallback) {
+			if (path.size() < 2) return fallback;
+			var d = path.get(path.size() - 1).subtract(path.get(path.size() - 2));
+			return d.lengthSqr() > 1e-8 ? d.normalize() : fallback;
+		}
+
+		/** The impact's facing: out of the block, or back along the bullet from a mob; null when it hit nothing. */
+		net.minecraft.world.phys.Vec3 normal(net.minecraft.world.phys.Vec3 fallback) {
+			if (landed()) return ((BlockHitResult) hit).getDirection().getUnitVec3();
+			return mob != null ? in(fallback).scale(-1) : null;
+		}
+	}
+
+	/**
+	 * Traces a bullet from {@code from} at {@code velocity} (blocks/s) under {@code gravity}, through Minecraft's blocks
+	 * and (with {@code mobs}) living mobs other than {@code skip}; a {@code target} it re-aims at every step (homing).
+	 */
+	private static Trace trace(Minecraft mc, net.minecraft.world.phys.Vec3 from, net.minecraft.world.phys.Vec3 velocity, double gravity, double lifetime,
+		boolean mobs, net.minecraft.world.entity.Entity skip, net.minecraft.world.entity.Entity target) {
+		var p = from;
+		var v = velocity;
+		double speed = velocity.length(), travelled = 0;
+		net.minecraft.world.entity.Entity mobHit = null;
+		HitResult hit = null;
+		var path = new java.util.ArrayList<net.minecraft.world.phys.Vec3>();
+		path.add(from);
+		for (double t = 0; t < lifetime && travelled < SHOT_RANGE; t += STEP_S) {
+			if (target != null && target.isAlive()) {
+				var aim = target.getBoundingBox().getCenter().subtract(p);
+				if (aim.lengthSqr() > 1e-6) v = aim.normalize().scale(speed);
+			}
+			var next = p.add(v.scale(STEP_S));
+			if (target == null) v = v.add(0, -gravity * STEP_S, 0);
+			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
+			if (mobs) {
+				// A living mob in the way, before the block (Deadlock's bullet radius: 18 units).
+				var mob = ProjectileUtil.getEntityHitResult(mc.level, mc.player, p, end, new AABB(p, end).inflate(1),
+					e -> e != mc.player && e != skip && e instanceof LivingEntity && e.isAlive() && !e.isSpectator(), (float) BULLET_RADIUS);
+				if (mob != null) {
+					mobHit = mob.getEntity();
+					end = mob.getLocation();
+				}
+			}
+			travelled += end.distanceTo(p);
+			path.add(end);
+			p = end;
+			if (mobHit != null || hit.getType() != HitResult.Type.MISS) break;
+		}
+		return new Trace(path, hit, mobHit, travelled);
+	}
+
+	/**
+	 * A bullet that hit at {@code at}, arriving along {@code in}, off a block facing {@code normal} (null: through
+	 * {@code struck}): bounces towards the best mob in the cone, if any, and draws and lands that leg.
+	 */
+	private static void ricochet(Minecraft mc, net.minecraft.world.phys.Vec3 at, net.minecraft.world.phys.Vec3 in, net.minecraft.world.phys.Vec3 normal,
+		net.minecraft.world.entity.Entity struck, double flown) {
+		if (mc.level == null || mc.player == null) return;
+		var out = bounce(in, normal);
+		var start = normal == null ? at : at.add(normal.scale(0.05));
+		LivingEntity best = null;
+		double bestCos = RICOCHET_COS;
+		for (var e : mc.level.getEntitiesOfClass(LivingEntity.class, new AABB(at, at).inflate(RICOCHET_RANGE),
+			e -> e != mc.player && e != struck && e.isAlive() && !e.isSpectator())) {
+			var to = e.getBoundingBox().getCenter().subtract(start);
+			if (!inRicochetCone(out, to)) continue;
+			double cos = to.normalize().dot(out);
+			if (cos < bestCos) continue;
+			var sight = mc.level.clip(new ClipContext(start, e.getBoundingBox().getCenter(), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+			if (sight.getType() != HitResult.Type.MISS) continue;
+			best = e;
+			bestCos = cos;
+		}
+		if (best == null) return;
+		var dir = best.getBoundingBox().getCenter().subtract(start).normalize();
+		double keep = Math.max(RICOCHET_MIN_KEEP, dir.dot(in));
+		Trace tr = trace(mc, start, dir.scale(BULLET_SPEED * keep), 0, BULLET_LIFETIME, true, struck, best);
+		if (ricochetLogs++ < 12) {
+			LOG.info("Deadcraft: ricochet towards {} {} blocks away, {} deg off the bounce, keeping {} of its speed; {}", best.getType().getDescriptionId(),
+				String.format("%.1f", start.distanceTo(best.position())), String.format("%.0f", Math.toDegrees(Math.acos(Math.min(1, bestCos)))),
+				String.format("%.2f", keep), tr.mob() != null ? "hit" : "missed");
+		}
+		if (tr.mob() != null) MobDamage.hit(tr.mob().getId(), MobDamage.GUN_DAMAGE * RICOCHET_DAMAGE_SCALE, flown + tr.travelled(), tr.seconds());
+		String weapon = Effects.weaponName();
+		if (weapon != null) Effects.gunShot(weapon, null, tr.path(), STEP_S, tr.normal(dir));
+	}
+
+	/** Where a bullet arriving along {@code in} would glance off a surface facing {@code normal} (null: straight on). */
+	static net.minecraft.world.phys.Vec3 bounce(net.minecraft.world.phys.Vec3 in, net.minecraft.world.phys.Vec3 normal) {
+		return normal == null ? in : in.subtract(normal.scale(2 * in.dot(normal))).normalize();
+	}
+
+	/** Whether a mob in direction {@code to} (from the hit) is in the ricochet's cone round {@code out}. */
+	static boolean inRicochetCone(net.minecraft.world.phys.Vec3 out, net.minecraft.world.phys.Vec3 to) {
+		double d = to.length();
+		return d >= 0.3 && d <= RICOCHET_RANGE && to.scale(1 / d).dot(out) >= RICOCHET_COS;
+	}
+
+	/** abilities.vdata m_flRicochetDamageScale. */
+	private static final float RICOCHET_DAMAGE_SCALE = 1;
+	private static int ricochetLogs;
+
+	/** Work to do later on the render thread (a bounce when the drawn bullet arrives). */
+	private record Later(long due, Runnable work) {}
+	private static final java.util.List<Later> laters = new java.util.ArrayList<>();
+
+	private static void later(double seconds, Runnable work) {
+		laters.add(new Later(System.nanoTime() + (long) (seconds * 1e9), work));
+	}
+
+	private static void runLaters() {
+		if (laters.isEmpty()) return;
+		long now = System.nanoTime();
+		var due = new java.util.ArrayList<Later>();
+		for (var it = laters.iterator(); it.hasNext();) {
+			var l = it.next();
+			if (l.due() <= now) {
+				due.add(l);
+				it.remove();
+			}
+		}
+		for (var l : due) l.work().run();
 	}
 	/**
 	 * Celeste's bullets (Deadlock's scripts/abilities.vdata, citadel_weapon_unicorn_set): 1968.5 units/s,
@@ -420,8 +546,13 @@ public final class Follow {
 		double pitch = Math.toRadians(shot.direction.x()), yaw = Math.toRadians(shot.direction.y());
 		var dir = new net.minecraft.world.phys.Vec3(Math.cos(pitch) * Math.cos(yaw), -Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
 		var from = toWorld(Proto.toMinecraft(shot.origin));
+		if (ricochet) {
+			// Deadlock's own ricochets head for its targets (none of them are in Minecraft): the client bounces its
+			// bullets towards Minecraft's mobs itself (ricochet()).
+			if (abilityShotLogs++ < 12) LOG.info("Deadcraft: Deadlock ricochet (not drawn: the client bounces towards Minecraft's mobs)");
+			return;
+		}
 		if (!gun && abilityShotLogs++ < 12) {
-			if (ricochet) LOG.info("Deadcraft: ricochet");
 			// Where ability bullets (Radiant Blast's cone) leave from and head, against the camera.
 			var f = camera.forwardVector();
 			double cos = dir.x * f.x() + dir.y * f.y() + dir.z * f.z();
@@ -441,51 +572,27 @@ public final class Follow {
 			DeadlockCamera.learnShotLine(-(off.x * left.x() + off.y * left.y() + off.z * left.z()), off.x * up.x() + off.y * up.y() + off.z * up.z());
 		}
 		// The bullet's flight: Celeste's drop under gravity, in short straight steps through Minecraft's blocks.
-		var p = from;
-		boolean bullet = gun || ricochet;
-		double keep = ricochet ? ricochetKeep(from, dir) : 1;
-		if (ricochet && abilityShotLogs <= 12) LOG.info("Deadcraft: ricochet keeps {} of its speed", String.format("%.2f", keep));
-		var v = dir.scale(bullet ? BULLET_SPEED * keep : BLAST_SPEED);
-		double step = 1 / 30.0, travelled = 0;
-		net.minecraft.world.entity.Entity mobHit = null;
-		HitResult hit = null;
-		var path = new java.util.ArrayList<net.minecraft.world.phys.Vec3>();
-		path.add(from);
-		for (double t = 0; t < (bullet ? BULLET_LIFETIME : BLAST_LIFETIME) && travelled < SHOT_RANGE; t += step) {
-			var next = p.add(v.scale(step));
-			v = v.add(0, -(bullet ? BULLET_GRAVITY : BLAST_GRAVITY) * step, 0);
-			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
-			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
-			if (bullet) {
-				// A living mob in the way, before the block (Deadlock's bullet radius: 18 units).
-				var mob = ProjectileUtil.getEntityHitResult(mc.level, mc.player, p, end, new AABB(p, end).inflate(1),
-					e -> e != mc.player && e instanceof LivingEntity && e.isAlive() && !e.isSpectator(), (float) BULLET_RADIUS);
-				if (mob != null) {
-					mobHit = mob.getEntity();
-					end = mob.getLocation();
-				}
-			}
-			travelled += end.distanceTo(p);
-			path.add(end);
-			p = end;
-			if (mobHit != null || hit.getType() != HitResult.Type.MISS) break;
-		}
-		boolean landed = mobHit == null && hit instanceof BlockHitResult b && hit.getType() != HitResult.Type.MISS;
-		var normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : null;
-		if (mobHit != null) {
-			// The impact faces back along the bullet; the mob is hurt when the drawn bullet gets there.
-			var in = path.get(path.size() - 1).subtract(path.get(path.size() - 2));
-			normal = in.lengthSqr() > 1e-8 ? in.normalize().scale(-1) : dir.scale(-1);
-			MobDamage.hit(mobHit.getId(), MobDamage.GUN_DAMAGE, travelled, step * (path.size() - 1));
-		}
-		if (bullet && landed && path.size() >= 2) {
-			var in = path.get(path.size() - 1).subtract(path.get(path.size() - 2));
-			if (in.lengthSqr() > 1e-8) gunHits.addLast(new GunHit(hit.getLocation(), in.normalize(), System.nanoTime()));
-			while (gunHits.size() > 16) gunHits.removeFirst();
+		boolean bullet = gun;
+		Trace tr = trace(mc, from, dir.scale(bullet ? BULLET_SPEED : BLAST_SPEED), bullet ? BULLET_GRAVITY : BLAST_GRAVITY,
+			bullet ? BULLET_LIFETIME : BLAST_LIFETIME, bullet, null, null);
+		var path = tr.path();
+		double step = STEP_S;
+		HitResult hit = tr.hit();
+		boolean landed = tr.landed();
+		var normal = tr.normal(dir);
+		if (tr.mob() != null) MobDamage.hit(tr.mob().getId(), MobDamage.GUN_DAMAGE, tr.travelled(), tr.seconds());
+		// Celeste's bullets bounce once towards a mob near where they hit, when the drawn bullet gets there.
+		if (bullet && (landed || tr.mob() != null)) {
+			var at = path.get(path.size() - 1);
+			var in = tr.in(dir);
+			var n = normal;
+			var struck = tr.mob();
+			double flown = tr.travelled();
+			later(tr.seconds(), () -> ricochet(mc, at, in, landed ? n : null, struck, flown));
 		}
 		// Deadlock's own effects for the hero's weapon when exported (hero-export --fx), else Minecraft particles.
 		String weapon = bullet ? Effects.weaponName() : Effects.bulletAbilityName();
-		var muzzle = ricochet ? null : Effects.attachmentWorld("weapon_top_fx");
+		var muzzle = Effects.attachmentWorld("weapon_top_fx");
 		boolean drawn = weapon != null && Effects.gunShot(weapon, muzzle, path, step, normal);
 		if (gun && shotsFired <= 5 && muzzle != null) {
 			LOG.info("Deadcraft: shot {}: drawn wand muzzle {} blocks from Deadlock's muzzle; effects {}", shotsFired,
