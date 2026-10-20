@@ -158,7 +158,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		var hero = FindHero();
 		bool alive = hero != null && hero.IsAlive;
 		if (!alive) _aliveSince = -1f;
-		else if (_aliveSince < 0) _aliveSince = GlobalVars.CurTime;
+		else if (_aliveSince < 0) _aliveSince = Now;
 		// Deadlock rejects the void map's spawn entities and spawns heroes at the world origin, the
 		// slab's corner, sometimes twice per spawn. Nothing else ever puts a hero there (home is over
 		// the slab's centre), so a hero near the origin has just spawned: move it to the centre.
@@ -264,7 +264,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		// select and spawning the pawn sits at the origin and must not be moved.
 		// Never while the client is unlinked: the stale colliders don't follow the hero, so a hero that
 		// wandered off them would be lifted into empty air, fall and be lifted again, forever.
-		if (!_clientLinked || _colliders.Active == 0 || Server.MapName != VoidMap || _aliveSince < 0 || GlobalVars.CurTime - _aliveSince < 1f) return;
+		if (!_clientLinked || _colliders.Active == 0 || Server.MapName != VoidMap || _aliveSince < 0 || Now - _aliveSince < 1f) return;
 		var p = hero.Position;
 		if (Math.Abs(p.X - Home.X) < MaxHorizontal && Math.Abs(p.Y - Home.Y) < MaxHorizontal
 			&& Math.Abs(p.Z - Home.Z) < MaxVertical) return;
@@ -297,7 +297,7 @@ public class DeadcraftPlugin : DeadworksPluginBase
 			{
 				float start = weapon.GetField<float>("CCitadel_Ability_PrimaryWeapon"u8, "m_flLastReloadStartTime"u8);
 				float end = weapon.GetField<float>("CCitadel_Ability_PrimaryWeapon"u8, "m_flReloadAvailableTime"u8);
-				if (end > start) fraction = Math.Clamp((GlobalVars.CurTime - start) / (end - start), 0f, 1f);
+				if (end > start) fraction = Math.Clamp((Now - start) / (end - start), 0f, 1f);
 				if (start != _reloadLoggedStart)
 				{
 					_reloadLoggedStart = start;
@@ -316,11 +316,27 @@ public class DeadcraftPlugin : DeadworksPluginBase
 		return reloading;
 	}
 
-	private static uint AbilitiesReady(CCitadelPlayerPawn hero)
+	/**
+	 * The server's clock from its tick count (64 a second). GlobalVars.CurTime reads frozen or garbage on the
+	 * current Deadworks (2026-10: the client saw it stop, then values like 8e31), and Deadworks' IsOnCooldown
+	 * compares against it: every ability read as on cooldown (ready bits always 0, round 10).
+	 */
+	private static float Now => GlobalVars.TickCount / 64f;
+
+	private readonly HashSet<int> _readyLogged = [];
+
+	private uint AbilitiesReady(CCitadelPlayerPawn hero)
 	{
 		uint ready = 0;
 		for (int i = 0; i < SignatureSlots.Length; i++)
-			if (hero.AbilityComponent.GetAbilityBySlot(SignatureSlots[i]) is { IsUnlocked: true, IsOnCooldown: false }) ready |= 1u << i;
+		{
+			var ability = hero.AbilityComponent.GetAbilityBySlot(SignatureSlots[i]);
+			if (ability == null) continue;
+			bool cooling = ability.CooldownEnd > Now + 0.02f;
+			if (_readyLogged.Add(i))
+				Log($"ability slot {i + 1}: unlocked {ability.IsUnlocked}, IsOnCooldown {ability.IsOnCooldown}, cooldown {ability.CooldownStart:F2} to {ability.CooldownEnd:F2}, now {Now:F2} (CurTime {GlobalVars.CurTime})");
+			if (!cooling) ready |= 1u << i;
+		}
 		return ready;
 	}
 

@@ -353,12 +353,16 @@ public final class CelesteFx {
 	static Vfx orbBurst(FxPack pack, Vec3 at, Vec3 normal, long seed) {
 		Beam pillar = new Beam(at, at.add(0, 3, 0), BEAM, 0.2f, 1, WHITE_BLUE, 1, 2.5f);
 		Beam haze = new Beam(at, at.add(0, 3, 0), GLOW, 0.5f, 1, BLUE, 0.4f, 1);
-		Ring ground = new Ring(at.add(0, 0.03, 0), UP, GLOW, 1.5f, 1.6f, 1, LIGHT_BLUE, 0.5f, 1, true).hold(0.5f);
+		// A soft glow on the ground and, for depth (round 10: the flat circle read as 2D), upright hoops of light
+		// spreading out from the pillar's foot.
+		Ring ground = new Ring(at.add(0, 0.03, 0), UP, GLOW, 1.2f, 1.3f, 1, LIGHT_BLUE, 0.35f, 1, true).hold(0.5f);
+		Band hoop = new Band(at, 0.2f, 1.3f, 0.02f, 0.02f, 0.18f, 0.5f, 0.7f, 0, Math.PI, BEAM, WHITE_BLUE, 0.9f, 2, true);
+		Band hoopHigh = new Band(at, 0.15f, 0.9f, 0.35f, 0.6f, 0.08f, 0.6f, 0.7f, 0, Math.PI, BEAM, LIGHT_BLUE, 0.6f, 1.5f, true);
 		Glow flash = Glow.flash(at.add(normal.scale(0.2)), GLOW, 0.5f, WHITE_BLUE, 0.9f, 1.5f, 0.3f, 1.3f);
 		Glow rainbow = Glow.flash(at.add(0, 0.5, 0), LENS, 0.8f, WHITE, 0.7f, 1.2f, 0.5f, 1.2f).frame(pack, 1);
 		Emitter stars = new Emitter(new Emitter.Spec().texture(SPARKLE).burst(6).duration(0.01f).life(0.5f, 0.9f).size(0.05f, 0.02f).color(WHITE_BLUE, CYAN)
 			.alpha(1, 0.05f, 0.5f).brightness(2.5f).velocity(0, 1, 0, 1).drag(2).spawnRadius(0.3f), pack, () -> at, null, seed);
-		return Vfx.group(haze, ground, pillar, rainbow, stars, flash);
+		return Vfx.group(haze, ground, hoop, hoopHigh, pillar, rainbow, stars, flash);
 	}
 
 	// ---- movement ---------------------------------------------------------------------------------
