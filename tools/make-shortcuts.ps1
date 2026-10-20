@@ -10,6 +10,8 @@
 # Deadlock saves the cap, so normal launches need "fps_max 400" in Deadlock's
 # game\citadel\cfg\autoexec.cfg (it runs before the shortcut's own commands).
 # The server can't set it: Deadlock ignores fps_max and mat_fullbright sent by a server.
+# engine_no_focus_sleep 0: without focus (a Minecraft screen open, alt-tab) Deadlock sleeps down to
+# 45-48 fps; with it, it keeps its cap (tested 2026-10-20: 120 fps in the background).
 #   .\tools\make-shortcuts.ps1 [-DeadlockFps 122]
 param([int]$DeadlockFps = 122)
 $ErrorActionPreference = 'Stop'
@@ -39,7 +41,7 @@ function New-Shortcut($name, $target, $arguments, $workDir, $icon) {
 New-Shortcut 'Deadcraft 1 - Start the movement server' "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
 	"-ExecutionPolicy Bypass -File `"$repo\tools\run-server.ps1`" -Map deadcraft_void -PauseOnError" $repo "$repo\tools\icons\server-block.ico,0"
 New-Shortcut 'Deadcraft 2 - Join with your hero' $steam `
-	"-applaunch $deadlockAppId -console +fps_max $DeadlockFps +connect localhost:27067" (Split-Path $steam) $deadlockIcon
+	"-applaunch $deadlockAppId -console +fps_max $DeadlockFps +engine_no_focus_sleep 0 +connect localhost:27067" (Split-Path $steam) $deadlockIcon
 # The window closes with Minecraft, or stays open to show the error if the build or game fails.
 # cmd /c strips the outermost pair of quotes, so the whole command line is wrapped in one more pair.
 New-Shortcut 'Deadcraft 3 - Show the Minecraft world' "$env:SystemRoot\System32\cmd.exe" `
