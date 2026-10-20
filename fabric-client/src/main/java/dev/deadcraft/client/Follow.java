@@ -13,6 +13,9 @@ import dev.deadcraft.client.hero.HeroAnimator;
 import dev.deadcraft.client.fx.Effects;
 import dev.deadcraft.client.hero.HeroRenderer;
 import net.minecraft.client.Minecraft;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -98,6 +101,7 @@ public final class Follow {
 	/** Called at the start of every frame, before the world is ticked and drawn. */
 	public static void beginFrame() {
 		Minecraft mc = Minecraft.getInstance();
+		MobDamage.tick(mc);
 		LocalPlayer player = mc.player;
 		Optional<HeroState> state = enabled && player != null ? readHero() : Optional.empty();
 		long now = System.currentTimeMillis();
@@ -391,7 +395,7 @@ public final class Follow {
 	 * gravity scale 0.2, 5 s lifetime. Deadlock's gravity is taken as Source's default 800 units/s/s
 	 * (unverified). Other heroes' weapons differ; ability bullets are drawn straight.
 	 */
-	private static final double BULLET_SPEED = 1968.5 / 64, BULLET_GRAVITY = 0.2 * 800 / 64, BULLET_LIFETIME = 5;
+	private static final double BULLET_SPEED = 1968.5 / 64, BULLET_GRAVITY = 0.2 * 800 / 64, BULLET_LIFETIME = 5, BULLET_RADIUS = 18 / 64.0;
 
 	/** An ability bullet starting further than this from the camera (blocks) is the gun's bullet bouncing. */
 	private static final double RICOCHET_FROM = 4;
@@ -443,6 +447,7 @@ public final class Follow {
 		if (ricochet && abilityShotLogs <= 12) LOG.info("Deadcraft: ricochet keeps {} of its speed", String.format("%.2f", keep));
 		var v = dir.scale(bullet ? BULLET_SPEED * keep : BLAST_SPEED);
 		double step = 1 / 30.0, travelled = 0;
+		net.minecraft.world.entity.Entity mobHit = null;
 		HitResult hit = null;
 		var path = new java.util.ArrayList<net.minecraft.world.phys.Vec3>();
 		path.add(from);
@@ -451,13 +456,28 @@ public final class Follow {
 			v = v.add(0, -(bullet ? BULLET_GRAVITY : BLAST_GRAVITY) * step, 0);
 			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
 			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
+			if (bullet) {
+				// A living mob in the way, before the block (Deadlock's bullet radius: 18 units).
+				var mob = ProjectileUtil.getEntityHitResult(mc.level, mc.player, p, end, new AABB(p, end).inflate(1),
+					e -> e != mc.player && e instanceof LivingEntity && e.isAlive() && !e.isSpectator(), (float) BULLET_RADIUS);
+				if (mob != null) {
+					mobHit = mob.getEntity();
+					end = mob.getLocation();
+				}
+			}
 			travelled += end.distanceTo(p);
 			path.add(end);
 			p = end;
-			if (hit.getType() != HitResult.Type.MISS) break;
+			if (mobHit != null || hit.getType() != HitResult.Type.MISS) break;
 		}
-		boolean landed = hit instanceof BlockHitResult b && hit.getType() != HitResult.Type.MISS;
+		boolean landed = mobHit == null && hit instanceof BlockHitResult b && hit.getType() != HitResult.Type.MISS;
 		var normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : null;
+		if (mobHit != null) {
+			// The impact faces back along the bullet; the mob is hurt when the drawn bullet gets there.
+			var in = path.get(path.size() - 1).subtract(path.get(path.size() - 2));
+			normal = in.lengthSqr() > 1e-8 ? in.normalize().scale(-1) : dir.scale(-1);
+			MobDamage.hit(mobHit.getId(), MobDamage.GUN_DAMAGE, travelled, step * (path.size() - 1));
+		}
 		if (bullet && landed && path.size() >= 2) {
 			var in = path.get(path.size() - 1).subtract(path.get(path.size() - 2));
 			if (in.lengthSqr() > 1e-8) gunHits.addLast(new GunHit(hit.getLocation(), in.normalize(), System.nanoTime()));
@@ -549,7 +569,7 @@ public final class Follow {
 			String.format("%.2f", leadFrames == 0 ? 0 : leadSum / leadFrames), String.format("%.1f", leadMax));
 		LOG.info("Deadcraft: {}; {}; top speed {} blocks/s; {}", HeroRenderer.stats(), Effects.stats(), String.format("%.2f", speedMax), crosshairLine());
 		LOG.info("Deadcraft: hud: {}", TestHud.lastLines());
-		LOG.info("Deadcraft: {}", TestHud.stutterLine());
+		LOG.info("Deadcraft: {}; {}", TestHud.stutterLine(), MobDamage.stats());
 		speedMax = 0;
 		statsSince = now;
 		frameMax = frameSum = exportMax = leadSum = leadMax = 0;

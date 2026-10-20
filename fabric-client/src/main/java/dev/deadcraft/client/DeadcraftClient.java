@@ -17,6 +17,7 @@ public final class DeadcraftClient implements ClientModInitializer {
 	public void onInitializeClient() {
 		ClientTickEvents.END_CLIENT_TICK.register(Follow::clientTick);
 		dev.deadcraft.client.fx.Effects.register();
+		MobDamage.load(net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("deadcraft-combat.properties"));
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("deadcraft", "test_hud"), (graphics, delta) -> TestHud.draw(graphics));
 		HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("deadcraft", "crosshair"), (graphics, delta) -> TestHud.crosshair(graphics));
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, context) -> dispatcher.register(
@@ -52,6 +53,10 @@ public final class DeadcraftClient implements ClientModInitializer {
 						.executes(c -> reply(c.getSource(), FxSettings.setSize(FloatArgumentType.getFloat(c, "factor"))))))
 					.then(ClientCommands.literal("reset").executes(c -> reply(c.getSource(), FxSettings.reset())))
 					.executes(c -> reply(c.getSource(), FxSettings.status())))
+				.then(ClientCommands.literal("damage")
+					.then(ClientCommands.argument("scale", FloatArgumentType.floatArg(0, MobDamage.MAX_SCALE))
+						.executes(c -> reply(c.getSource(), MobDamage.setScale(FloatArgumentType.getFloat(c, "scale")))))
+					.executes(c -> reply(c.getSource(), MobDamage.status())))
 				.then(ClientCommands.literal("hero")
 					.then(ClientCommands.literal("scale").then(ClientCommands.argument("factor", FloatArgumentType.floatArg(0.25f, 4f))
 						.executes(c -> reply(c.getSource(), Follow.heroScale(FloatArgumentType.getFloat(c, "factor"))))))
