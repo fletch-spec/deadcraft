@@ -48,6 +48,38 @@ public interface Vfx {
 		};
 	}
 
+	/** An effect made and started {@code seconds} from now (the strike after its warning). */
+	static Vfx after(float seconds, java.util.function.Supplier<Vfx> make) {
+		return new Vfx() {
+			private float time;
+			private Vfx started;
+			private boolean stopped;
+
+			@Override
+			public boolean tick(float dt) {
+				time += dt;
+				if (started == null) {
+					if (stopped) return false;
+					if (time < seconds) return true;
+					started = make.get();
+					return started.tick(time - seconds);
+				}
+				return started.tick(dt);
+			}
+
+			@Override
+			public void draw(Vec3 eye, Vec3 right, Vec3 up, Out out) {
+				if (started != null) started.draw(eye, right, up, out);
+			}
+
+			@Override
+			public void stop() {
+				stopped = true;
+				if (started != null) started.stop();
+			}
+		};
+	}
+
 	/** Linear colour (0..1 each) and alpha to the ARGB the cards take. */
 	static int argb(float r, float g, float b, float a) {
 		return (clamp255(a) << 24) | (clamp255(r) << 16) | (clamp255(g) << 8) | clamp255(b);

@@ -66,6 +66,12 @@ public final class Bloom {
 	private static GpuBuffer vertexBuffer, viewUniform, configUniform;
 	private static ByteBuffer vertices = ByteBuffer.allocateDirect(VERTEX_BYTES * 6 * 256).order(ByteOrder.nativeOrder());
 	private static int vertexCount;
+	/** Reused each frame: the uniforms' bytes, the view matrix and the clear colour (no per-frame garbage). */
+	private static final ByteBuffer viewBytes = ByteBuffer.allocateDirect(80).order(ByteOrder.nativeOrder()),
+		configBytes = ByteBuffer.allocateDirect(16).order(ByteOrder.nativeOrder());
+	private static final Matrix4f viewProj = new Matrix4f();
+	private static final Vector4f CLEAR = new Vector4f(0, 0, 0, 0);
+	private static final int[] CARD = {0, 1, 2, 0, 2, 3};
 	private static final List<Batch> batches = new ArrayList<>();
 	private static boolean broken;
 	private static String problem = "";
@@ -124,7 +130,7 @@ public final class Bloom {
 		for (int q = 0; q < cards; q++) {
 			int b = q * 4;
 			// Two triangles a card: 0 1 2, 0 2 3.
-			for (int k : new int[] {0, 1, 2, 0, 2, 3}) {
+			for (int k : CARD) {
 				int i = b + k, o = i * 5, c = colors[i];
 				vertices.putFloat(data[o]).putFloat(data[o + 1]).putFloat(data[o + 2]).putFloat(data[o + 3]).putFloat(data[o + 4]);
 				vertices.put((byte) (c >> 16)).put((byte) (c >> 8)).put((byte) c).put((byte) (c >>> 24));
@@ -172,22 +178,21 @@ public final class Bloom {
 		encoder.writeToBuffer(vertexBuffer.slice(0, bytes), upload);
 
 		var camera = ctx.levelState().cameraRenderState;
-		Matrix4f viewProj = new Matrix4f(camera.projectionMatrix).mul(camera.viewRotationMatrix).mul(pose);
-		ByteBuffer view = ByteBuffer.allocateDirect(80).order(ByteOrder.nativeOrder());
-		viewProj.get(0, view);
-		view.putFloat(64, 1).putFloat(68, 0).putFloat(72, 0).putFloat(76, 0);
-		encoder.writeToBuffer(viewUniform.slice(), view);
-		ByteBuffer config = ByteBuffer.allocateDirect(16).order(ByteOrder.nativeOrder());
+		viewProj.set(camera.projectionMatrix).mul(camera.viewRotationMatrix).mul(pose);
+		viewProj.get(0, viewBytes);
+		viewBytes.putFloat(64, 1).putFloat(68, 0).putFloat(72, 0).putFloat(76, 0);
+		viewBytes.clear();
+		encoder.writeToBuffer(viewUniform.slice(), viewBytes);
 		// The up passes add every level onto the next: divide by their count so strength 1 is one level's light.
-		config.putFloat(0, FxSettings.bloom() / LEVELS).putFloat(4, 0).putFloat(8, 0).putFloat(12, 0);
-		encoder.writeToBuffer(configUniform.slice(), config);
+		configBytes.putFloat(0, FxSettings.bloom() / LEVELS).putFloat(4, 0).putFloat(8, 0).putFloat(12, 0);
+		configBytes.clear();
+		encoder.writeToBuffer(configUniform.slice(), configBytes);
 
 		GpuSampler linear = RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
 		GpuSampler repeat = RenderSystem.getSamplerCache().getRepeat(FilterMode.LINEAR);
 		var textureManager = Minecraft.getInstance().getTextureManager();
-		Vector4f clear = new Vector4f(0, 0, 0, 0);
 
-		try (RenderPass pass = encoder.createRenderPass(() -> "deadcraft bloom source", views[0], Optional.of(clear), main.getDepthTextureView(), OptionalDouble.empty())) {
+		try (RenderPass pass = encoder.createRenderPass(() -> "deadcraft bloom source", views[0], Optional.of(CLEAR), main.getDepthTextureView(), OptionalDouble.empty())) {
 			pass.setPipeline(RenderSystem.getCompiledPipeline(source));
 			pass.setUniform("BloomView", viewUniform);
 			pass.setVertexBuffer(0, vertexBuffer.slice(0, bytes));
@@ -199,7 +204,7 @@ public final class Bloom {
 		}
 		for (int i = 1; i <= LEVELS; i++) {
 			final int level = i;
-			try (RenderPass pass = encoder.createRenderPass(() -> "deadcraft bloom down " + level, views[i], Optional.of(clear))) {
+			try (RenderPass pass = encoder.createRenderPass(() -> "deadcraft bloom down " + level, views[i], Optional.of(CLEAR))) {
 				pass.setPipeline(RenderSystem.getCompiledPipeline(down));
 				pass.setUniform("InSampler", views[i - 1], linear);
 				pass.draw(3, 1, 0, 0);

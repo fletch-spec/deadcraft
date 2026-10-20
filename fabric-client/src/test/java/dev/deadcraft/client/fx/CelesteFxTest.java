@@ -19,11 +19,16 @@ class CelesteFxTest {
 
 	/** Draws an effect into a preview frame centred on {@code centre} (Minecraft blocks). */
 	static FxPreview frame(FxPack pack, Vfx v, Vec3 centre, float[] background, float bloom) {
+		return frame(pack, v, centre, background, bloom, FxPreviewTest.GAME_PIXELS_PER_UNIT);
+	}
+
+	/** {@link #frame} at {@code pixelsPerUnit} (the game's scale close up is 7: a frame is half a block wide). */
+	static FxPreview frame(FxPack pack, Vfx v, Vec3 centre, float[] background, float bloom, float pixelsPerUnit) {
 		Vec3 eye = centre.add(BACK);
 		// The preview takes Source units (x, -z, y) x 64; the view's right and up in those axes.
 		Renderers.View view = new Renderers.View(new float[] {0, 0, 0}, new float[] {0, -1, 0}, new float[] {0, 0, 1});
 		float[] c = {(float) (centre.x - eye.x) * 64, (float) -(centre.z - eye.z) * 64, (float) (centre.y - eye.y) * 64};
-		FxPreview f = new FxPreview(pack, view, c, FxPreviewTest.GAME_PIXELS_PER_UNIT, 256, 256, background);
+		FxPreview f = new FxPreview(pack, view, c, pixelsPerUnit, 256, 256, background);
 		float[] src = new float[12];
 		v.draw(eye, RIGHT, UP, (texture, add, xyz, uv, argb, bright) -> {
 			for (int i = 0; i < 4; i++) {
@@ -38,7 +43,8 @@ class CelesteFxTest {
 	}
 
 	/** Runs a fresh effect to each time and draws it there, over a background. */
-	static FxPreview[] run(FxPack pack, Function<float[], Vfx> make, float[] clock, Vec3 centre, float[] times, float[] background, float bloom) {
+	static FxPreview[] run(FxPack pack, Function<float[], Vfx> make, float[] clock, Vec3 centre, float[] times, float[] background, float bloom,
+		float pixelsPerUnit) {
 		clock[0] = 0;
 		Vfx v = make.apply(clock);
 		FxPreview[] frames = new FxPreview[times.length];
@@ -47,16 +53,20 @@ class CelesteFxTest {
 				clock[0] += 1 / 120f;
 				v.tick(1 / 120f);
 			}
-			frames[f] = frame(pack, v, centre, background, bloom);
+			frames[f] = frame(pack, v, centre, background, bloom, pixelsPerUnit);
 		}
 		return frames;
 	}
 
 	static void rows(FxPack pack, String name, Function<float[], Vfx> make, Vec3 centre, float[] times) throws Exception {
+		rows(pack, name, make, centre, times, FxPreviewTest.GAME_PIXELS_PER_UNIT);
+	}
+
+	static void rows(FxPack pack, String name, Function<float[], Vfx> make, Vec3 centre, float[] times, float ppu) throws Exception {
 		float[] clock = {0};
 		float b = FxSettings.DEFAULT_BLOOM;
-		FxPreview.writeRows(new FxPreview[][] {run(pack, make, clock, centre, times, null, 0), run(pack, make, clock, centre, times, null, b),
-			run(pack, make, clock, centre, times, FxPreviewTest.DAY_SKY, 0), run(pack, make, clock, centre, times, FxPreviewTest.DAY_SKY, b)},
+		FxPreview.writeRows(new FxPreview[][] {run(pack, make, clock, centre, times, null, 0, ppu), run(pack, make, clock, centre, times, null, b, ppu),
+			run(pack, make, clock, centre, times, FxPreviewTest.DAY_SKY, 0, ppu), run(pack, make, clock, centre, times, FxPreviewTest.DAY_SKY, b, ppu)},
 			OUT.resolve("celeste_" + name + ".png"));
 	}
 
@@ -73,6 +83,22 @@ class CelesteFxTest {
 			rows(pack, "impact", c -> CelesteFx.impact(pack, o, new Vec3(1, 0, 0), 3), o, new float[] {0.02f, 0.06f, 0.12f, 0.2f, 0.3f});
 			// Crossing the view at Celeste's bullet speed (30.8 blocks/s), centred where it is at each time.
 			rows(pack, "tracer", c -> CelesteFx.tracer(pack, () -> new Vec3(0, 0, -0.25 + c[0] * 30.8), 4), new Vec3(0, 0, 0), new float[] {0.004f, 0.008f, 0.012f, 0.016f, 0.02f});
+			// The tracer from further back (a frame 4.5 blocks wide), crossing it.
+			rows(pack, "tracer_wide", c -> CelesteFx.tracer(pack, () -> new Vec3(0, 0, -2.5 + c[0] * 30.8), 4), o, new float[] {0.05f, 0.08f, 0.11f, 0.14f, 0.2f}, 0.9f);
+			// Abilities, at a frame 2.3 blocks wide unless said.
+			rows(pack, "radiant_blast", c -> CelesteFx.radiantBlast(pack, o, dir, 5), o, new float[] {0.02f, 0.05f, 0.1f, 0.2f, 0.35f}, 1.75f);
+			rows(pack, "radiant_dagger", c -> CelesteFx.radiantDagger(pack, () -> new Vec3(0, 0, -1 + c[0] * 40), 6), o, new float[] {0.02f, 0.03f, 0.04f, 0.05f, 0.06f}, 1.75f);
+			Vec3 body = new Vec3(0, 0, 0);
+			rows(pack, "prismatic_guard", c -> CelesteFx.prismaticGuard(pack, () -> new Vec3(0, 0.6, 0), () -> body, 7), o, new float[] {0.05f, 0.2f, 0.6f, 1.2f, 2f}, 1.75f);
+			// A frame 18 blocks wide, centred 7 up the pillar.
+			rows(pack, "luminous_strike", c -> CelesteFx.luminousStrike(pack, () -> new Vec3(0, 0, 0), new Vec3(0, -7, 0), 8), o, new float[] {0.1f, 0.2f, 0.3f, 0.45f, 0.7f}, 0.22f);
+			rows(pack, "orb_charge", c -> CelesteFx.orbCharge(pack, () -> o, 9), o, new float[] {0.1f, 0.3f, 0.6f, 1f, 1.5f}, 1.75f);
+			rows(pack, "orb_flight", c -> CelesteFx.orbFlight(pack, () -> new Vec3(0, 0, -1 + c[0] * 20), 10), o, new float[] {0.02f, 0.05f, 0.08f, 0.11f, 0.14f}, 1.75f);
+			// 9 blocks wide.
+			rows(pack, "orb_burst", c -> CelesteFx.orbBurst(pack, o, new Vec3(1, 0, 0), 11), o, new float[] {0.03f, 0.1f, 0.2f, 0.35f, 0.6f}, 0.45f);
+			rows(pack, "dash", c -> CelesteFx.dash(pack, () -> new Vec3(0, 0, -1 + c[0] * 10), new Vec3(0, -0.8, -1), new Vec3(0, 0, 1), 12), o,
+				new float[] {0.05f, 0.1f, 0.15f, 0.2f, 0.3f}, 0.9f);
+			rows(pack, "air_jump", c -> CelesteFx.airJump(pack, new Vec3(0, -0.2, 0), 13), o, new float[] {0.03f, 0.08f, 0.15f, 0.25f, 0.4f}, 1.75f);
 		}
 	}
 
@@ -90,6 +116,53 @@ class CelesteFxTest {
 			float t = 0;
 			while (flame.tick(1 / 60f) && t < 3) t += 1 / 60f;
 			assertTrue(t < 2, "the flame is gone within 2 s of its end going away (" + t + ")");
+		}
+	}
+
+	/** Abilities and movement effects end on their own; the orb's charge goes out when she stops holding it. */
+	@Test
+	void abilityEffectsEnd() throws Exception {
+		try (FxPack pack = FxRealPackTest.celeste()) {
+			Vec3 o = Vec3.ZERO, x = new Vec3(1, 0, 0), up = new Vec3(0, 1, 0);
+			Vfx[] all = {CelesteFx.radiantBlast(pack, o, x, 1), CelesteFx.radiantHit(pack, o, up, 2), CelesteFx.prismaticGuard(pack, () -> o, () -> o, 3),
+				CelesteFx.luminousStrike(pack, () -> o, new Vec3(5, 0, 0), 4), CelesteFx.orbBurst(pack, o, up, 5), CelesteFx.dash(pack, () -> o, o, x, 6),
+				CelesteFx.airJump(pack, o, 7)};
+			for (Vfx v : all) {
+				float t = 0;
+				while (v.tick(1 / 60f) && t < 5) t += 1 / 60f;
+				assertTrue(t < 3, "over in " + t + " s");
+			}
+			boolean[] held = {true};
+			Vfx charge = CelesteFx.orbCharge(pack, () -> held[0] ? o : null, 8);
+			for (int i = 0; i < 120; i++) assertTrue(charge.tick(1 / 60f));
+			held[0] = false;
+			float t = 0;
+			while (charge.tick(1 / 60f) && t < 3) t += 1 / 60f;
+			assertTrue(t < 1, "the charge goes out within 1 s of letting go (" + t + ")");
+		}
+	}
+
+	/** The flame rides the wand: moved half a block, its local flame moves with it (not left behind). */
+	@Test
+	void wandFlameStaysOnTheWand() throws Exception {
+		try (FxPack pack = FxRealPackTest.celeste()) {
+			Vec3[] end = {Vec3.ZERO};
+			Vfx flame = CelesteFx.wandFlame(pack, () -> end[0], 9);
+			for (int i = 0; i < 60; i++) flame.tick(1 / 60f);
+			end[0] = new Vec3(0, 0, 0.5);
+			flame.tick(1 / 120f);
+			// Cards still near the old spot can only be the smear (short-lived) and the drifting smoke and sparkles.
+			for (int i = 0; i < 30; i++) flame.tick(1 / 120f);
+			double[] far = {0};
+			int[] cards = {0};
+			flame.draw(BACK, RIGHT, UP, (tex, a, xyz, uv, argb, b) -> {
+				if (!tex.equals(CelesteFx.FLAME)) return;
+				cards[0]++;
+				double cz = (xyz[2] + xyz[5] + xyz[8] + xyz[11]) / 4 + BACK.z;
+				far[0] = Math.max(far[0], Math.abs(cz - 0.5));
+			});
+			assertTrue(cards[0] > 5, "flame cards: " + cards[0]);
+			assertTrue(far[0] < 0.15, "a flame card " + far[0] + " blocks off the wand's end, 0.25 s after it moved");
 		}
 	}
 

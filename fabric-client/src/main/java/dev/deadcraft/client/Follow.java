@@ -64,6 +64,8 @@ public final class Follow {
 	private static final LookPredictor look = new LookPredictor(rawMouse);
 	private static boolean rawLook = true;
 	private static long lastLookTick = -1;
+	/** Seconds Deadlock's CurTime lags its tick count (logged: it stopped advancing in October 2026, see {@link HeroTimeline#serverTime}). */
+	private static double curTimeDrift;
 	private static int lastAbilitySerial = -1;
 	private static int lastShotSerial = -1;
 	private static boolean savedBobView;
@@ -150,6 +152,10 @@ public final class Follow {
 		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
 
 		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z(), HeroRenderer.sliding(), localNow);
+		// Before the ability events: an air jump is told from a ground one by time in the air.
+		Vec3 heroVelocity = Proto.toMinecraft(hero.velocity);
+		Effects.movement((hero.flags & HeroFlags.ON_GROUND) != 0, HeroRenderer.sliding(),
+			new net.minecraft.world.phys.Vec3(heroVelocity.x(), heroVelocity.y(), heroVelocity.z()));
 		readAbilities(hero);
 		meleeTravel(hero);
 		readShots(mc, hero);
@@ -167,13 +173,15 @@ public final class Follow {
 			speedMax = Math.max(speedMax, Math.hypot(forward, right));
 		}
 		Vec3 v = Proto.toMinecraft(hero.velocity);
-		timeline.add(new HeroTimeline.Sample(hero.tick, hero.serverTime, heroBlocks.x(), heroBlocks.y(), heroBlocks.z(),
+		double serverTime = HeroTimeline.serverTime(hero.tick);
+		curTimeDrift = serverTime - hero.serverTime;
+		timeline.add(new HeroTimeline.Sample(hero.tick, serverTime, heroBlocks.x(), heroBlocks.y(), heroBlocks.z(),
 			hero.cameraAngles.y(), hero.cameraAngles.x(), v.x(), v.y(), v.z()), localNow);
 		if (hero.tick != lastLookTick) {
 			lastLookTick = hero.tick;
 			// When it reached us: its tick's slot on the server clock, but never before the previous frame,
 			// whose read didn't see it yet (a late server tick still carries input up to when it ran).
-			double arrived = Math.max(timeline.localTime(hero.serverTime), lastFrame > 0 ? lastFrame : localNow);
+			double arrived = Math.max(timeline.localTime(serverTime), lastFrame > 0 ? lastFrame : localNow);
 			look.addSample(arrived, hero.cameraAngles.y(), hero.cameraAngles.x());
 		}
 		HeroTimeline.Pose pose = timeline.poseAt(localNow);
@@ -221,13 +229,13 @@ public final class Follow {
 			player.yBob = player.yBobO = yaw;
 		}
 		frameStats(mc, localNow);
-		TestHud.frame(localNow, (localNow - timeline.localTime(hero.serverTime)) * 1000);
+		TestHud.frame(localNow, (localNow - timeline.localTime(serverTime)) * 1000);
 	}
 
 	static String timelineHudLine() {
 		int[] d = timeline.takeDryFrames();
-		return String.format("position drawn %.0f ms behind (%s), ran past the newest sample on %d of %d frames", timeline.delay() * 1000,
-			timeline.adaptive() ? "adaptive" : "fixed", d[0], d[1]);
+		return String.format("position drawn %.0f ms behind (%s), ran past the newest sample on %d of %d frames; Deadlock's CurTime %.1f s behind its ticks",
+			timeline.delay() * 1000, timeline.adaptive() ? "adaptive" : "fixed", d[0], d[1], curTimeDrift);
 	}
 
 	static String lookHudLine() {
@@ -353,9 +361,15 @@ public final class Follow {
 	 */
 	private static final double BULLET_SPEED = 1968.5 / 64, BULLET_GRAVITY = 0.2 * 800 / 64, BULLET_LIFETIME = 5;
 
+	/** An ability bullet starting further than this from the camera (blocks) is the gun's bullet bouncing. */
+	private static final double RICOCHET_FROM = 4;
+
 	private static void fired(Minecraft mc, Shot shot) {
 		boolean gun = shot.kind == ShotKind.FIRED;
 		var camera = mc.gameRenderer.mainCamera();
+		// Round 6: "ability" bullets 31 to 50 blocks out, a second or so after gun hits there: ricochets (Celeste's
+		// bullets bounce), not Radiant Blast. They fly and look like the gun's, without its muzzle flash.
+		boolean ricochet = !gun && toWorld(Proto.toMinecraft(shot.origin)).distanceTo(camera.position()) > RICOCHET_FROM;
 		if (gun) {
 			HeroRenderer.shot();
 			shotsFired++;
@@ -371,6 +385,7 @@ public final class Follow {
 		var dir = new net.minecraft.world.phys.Vec3(Math.cos(pitch) * Math.cos(yaw), -Math.sin(pitch), -Math.cos(pitch) * Math.sin(yaw));
 		var from = toWorld(Proto.toMinecraft(shot.origin));
 		if (!gun && abilityShotLogs++ < 12) {
+			if (ricochet) LOG.info("Deadcraft: ricochet");
 			// Where ability bullets (Radiant Blast's cone) leave from and head, against the camera.
 			var f = camera.forwardVector();
 			double cos = dir.x * f.x() + dir.y * f.y() + dir.z * f.z();
@@ -391,16 +406,17 @@ public final class Follow {
 		}
 		// The bullet's flight: Celeste's drop under gravity, in short straight steps through Minecraft's blocks.
 		var p = from;
-		var v = dir.scale(gun ? BULLET_SPEED : SHOT_RANGE);
+		boolean bullet = gun || ricochet;
+		var v = dir.scale(bullet ? BULLET_SPEED : SHOT_RANGE);
 		double step = 1 / 30.0, travelled = 0;
 		HitResult hit = null;
 		var path = new java.util.ArrayList<net.minecraft.world.phys.Vec3>();
 		path.add(from);
-		double range = gun ? SHOT_RANGE : ABILITY_RANGE;
-		for (double t = 0; t < (gun ? BULLET_LIFETIME : 1) && travelled < range; t += step) {
+		double range = bullet ? SHOT_RANGE : ABILITY_RANGE;
+		for (double t = 0; t < (bullet ? BULLET_LIFETIME : 1) && travelled < range; t += step) {
 			var next = p.add(v.scale(step));
-			if (gun) v = v.add(0, -BULLET_GRAVITY * step, 0);
-			if (!gun && travelled + next.distanceTo(p) > range) next = p.add(next.subtract(p).normalize().scale(range - travelled));
+			if (bullet) v = v.add(0, -BULLET_GRAVITY * step, 0);
+			if (!bullet && travelled + next.distanceTo(p) > range) next = p.add(next.subtract(p).normalize().scale(range - travelled));
 			hit = mc.level.clip(new ClipContext(p, next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
 			var end = hit.getType() == HitResult.Type.MISS ? next : hit.getLocation();
 			travelled += end.distanceTo(p);
@@ -411,8 +427,8 @@ public final class Follow {
 		boolean landed = hit instanceof BlockHitResult b && hit.getType() != HitResult.Type.MISS;
 		var normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : null;
 		// Deadlock's own effects for the hero's weapon when exported (hero-export --fx), else Minecraft particles.
-		String weapon = gun ? Effects.weaponName() : Effects.bulletAbilityName();
-		var muzzle = Effects.attachmentWorld("weapon_top_fx");
+		String weapon = bullet ? Effects.weaponName() : Effects.bulletAbilityName();
+		var muzzle = ricochet ? null : Effects.attachmentWorld("weapon_top_fx");
 		boolean drawn = weapon != null && Effects.gunShot(weapon, muzzle, path, step, normal);
 		if (gun && shotsFired <= 5 && muzzle != null) {
 			LOG.info("Deadcraft: shot {}: drawn wand muzzle {} blocks from Deadlock's muzzle; effects {}", shotsFired,
@@ -496,6 +512,7 @@ public final class Follow {
 			String.format("%.2f", leadFrames == 0 ? 0 : leadSum / leadFrames), String.format("%.1f", leadMax));
 		LOG.info("Deadcraft: {}; {}; top speed {} blocks/s; {}", HeroRenderer.stats(), Effects.stats(), String.format("%.2f", speedMax), crosshairLine());
 		LOG.info("Deadcraft: hud: {}", TestHud.lastLines());
+		LOG.info("Deadcraft: {}", TestHud.stutterLine());
 		speedMax = 0;
 		statsSince = now;
 		frameMax = frameSum = exportMax = leadSum = leadMax = 0;

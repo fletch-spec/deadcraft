@@ -18,6 +18,7 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 import net.minecraft.client.Minecraft;
@@ -25,7 +26,14 @@ import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.BlockParticleOption;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
@@ -34,7 +42,7 @@ import org.joml.Matrix4f;
  * {@code LevelRenderEvents.COLLECT_SUBMITS} (and bloomed, {@link Bloom}). Celeste's are hand-built
  * ({@link CelesteFx}, {@link Vfx}) with Deadlock's textures from the effects pack: playing Deadlock's own particle
  * systems ({@link FxSystem}, a port of its simulation) left too much missing or wrong in game (5 test rounds), so
- * that path is no longer used for the wand and the gun, and abilities have no effects until theirs are built.
+ * that path is no longer used for Celeste: her wand, gun, abilities and movement are all hand-built.
  */
 public final class Effects {
 	private Effects() {
@@ -133,6 +141,8 @@ public final class Effects {
 	private static void close() {
 		active.clear();
 		hand.clear();
+		orbChargeFx = null;
+		orbHeld = false;
 		handStarting.clear();
 		for (int i = 0; i < wandFlames.length; i++) wandFlames[i] = null;
 		if (pack != null) {
@@ -193,11 +203,22 @@ public final class Effects {
 
 	/** Where a model attachment (muzzle_fx, horn_tip_fx, ...) is on the drawn hero, or null. */
 	public static Vec3 attachmentWorld(String name) {
+		// Worked out once a frame: a dozen emitters and glows ask for the wand's ends every frame.
+		if (attachmentFrame != frameCount) {
+			attachments.clear();
+			attachmentFrame = frameCount;
+		}
+		if (attachments.containsKey(name)) return attachments.get(name);
 		FxPack p = pack();
 		FxPack.Attachment at = p == null ? null : p.attachments.get(name);
 		if (at != null) at = p.onModel(at, HeroRenderer::hasBone);
-		return at == null ? null : HeroRenderer.boneWorld(at.bone(), at.offset());
+		Vec3 world = at == null ? null : HeroRenderer.boneWorld(at.bone(), at.offset());
+		attachments.put(name, world);
+		return world;
 	}
+
+	private static final Map<String, Vec3> attachments = new HashMap<>();
+	private static long attachmentFrame = -1, frameCount;
 
 	// ---- the wand's flames ------------------------------------------------------------------------
 
@@ -265,7 +286,7 @@ public final class Effects {
 		FxPack p = broken ? null : pack();
 		if (p == null) return;
 		if (handBuilt()) {
-			if (abilityLogs++ < 10) FxPack.LOG.info("Deadcraft: ability {}: no hand-built effect yet", name);
+			handAbility(p, name);
 			return;
 		}
 		for (String[] k : CAST_KEYS) {
@@ -279,7 +300,11 @@ public final class Effects {
 
 	/** Holds the orb's charge effect while the hero channels (Dazzling Orb), and lets it go when they stop. */
 	public static void channeling(boolean on) {
-		if (broken || handBuilt()) return;
+		if (broken) return;
+		if (handBuilt()) {
+			handChanneling(on);
+			return;
+		}
 		boolean alive = orbCharge != null && (active.contains(orbCharge) || starting.contains(orbCharge)) && !orbCharge.stopped;
 		if (on && !alive) {
 			FxPack p = pack();
@@ -340,7 +365,7 @@ public final class Effects {
 	public static boolean gunShot(String weapon, Vec3 drawnMuzzle, List<Vec3> path, double step, Vec3 hitNormal) {
 		FxPack p = broken ? null : pack();
 		if (p == null || path.size() < 2) return false;
-		if (handBuilt()) return handShot(p, drawnMuzzle, path, step, hitNormal);
+		if (handBuilt()) return handShot(p, weapon, drawnMuzzle, path, step, hitNormal);
 		String tracer = p.effect(weapon, GUN_TRACER), muzzle = p.effect(weapon, GUN_MUZZLE), impact = p.effect(weapon, GUN_IMPACT);
 		if (tracer == null) return false;
 		Vec3 from = path.get(0), dir = path.get(1).subtract(from).normalize();
@@ -369,17 +394,22 @@ public final class Effects {
 		return true;
 	}
 
-	/** {@link #gunShot} with Celeste's hand-built muzzle flash, tracer and impact. */
-	private static boolean handShot(FxPack p, Vec3 drawnMuzzle, List<Vec3> path, double step, Vec3 hitNormal) {
+	/**
+	 * {@link #gunShot} with Celeste's hand-built muzzle flash, tracer and impact; Radiant Blast's bullets (an ability's,
+	 * not the weapon's) as daggers of light. No muzzle flash without a drawn muzzle (a ricochet leaves from where the
+	 * bullet bounced).
+	 */
+	private static boolean handShot(FxPack p, String weapon, Vec3 drawnMuzzle, List<Vec3> path, double step, Vec3 hitNormal) {
+		boolean ability = weapon != null && !weapon.startsWith("citadel_weapon_");
 		Vec3 from = path.get(0), dir = path.get(1).subtract(from).normalize();
 		Vec3 wand = drawnMuzzle != null ? drawnMuzzle : from;
-		play(CelesteFx.muzzleFlash(p, wand, dir, seed++ * 7919));
+		if (drawnMuzzle != null && !ability) play(CelesteFx.muzzleFlash(p, wand, dir, seed++ * 7919));
 		Vec3 offset = wand.subtract(from);
 		double total = step * (path.size() - 1);
 		float[] clock = {0};
 		boolean[] done = {false};
 		// The bullet's position on its own clock (the tracer's ribbon steps it): from the drawn wand onto the real path.
-		Vfx tracer = CelesteFx.tracer(p, () -> {
+		Supplier<Vec3> bullet = () -> {
 			if (done[0]) return null;
 			double t = clock[0];
 			double f = Math.min(t, total) / step;
@@ -387,7 +417,8 @@ public final class Effects {
 			Vec3 at = path.get(i).lerp(path.get(i + 1), f - i);
 			double blend = Math.max(0, 1 - t / MUZZLE_BLEND_S);
 			return at.add(offset.scale(blend * blend));
-		}, seed++ * 7919);
+		};
+		Vfx tracer = ability ? CelesteFx.radiantDagger(p, bullet, seed++ * 7919) : CelesteFx.tracer(p, bullet, seed++ * 7919);
 		play(new Vfx() {
 			@Override
 			public boolean tick(float dt) {
@@ -395,7 +426,8 @@ public final class Effects {
 				if (!done[0] && clock[0] >= total) {
 					done[0] = true;
 					tracer.stop();
-					if (hitNormal != null) play(CelesteFx.impact(p, path.get(path.size() - 1), hitNormal, seed++ * 7919));
+					Vec3 end = path.get(path.size() - 1);
+					if (hitNormal != null) play(ability ? CelesteFx.radiantHit(p, end, hitNormal, seed++ * 7919) : CelesteFx.impact(p, end, hitNormal, seed++ * 7919));
 				}
 				return tracer.tick(dt);
 			}
@@ -413,6 +445,207 @@ public final class Effects {
 		return true;
 	}
 
+	// ---- Celeste's abilities and movement (hand-built) -----------------------------------------------
+
+	/** Luminous Strike lands where she aims, up to this far (blocks): a guess, the plugin doesn't send its target. */
+	private static final double STRIKE_RANGE = 30;
+	/** The thrown orb's speed (blocks/s) and reach (blocks): guesses, the plugin doesn't send the orb. */
+	private static final double ORB_SPEED = 20, ORB_RANGE = 30;
+	private static final java.util.Set<String> abilitiesLogged = new java.util.HashSet<>();
+
+	private static long nextSeed() {
+		return seed++ * 7919;
+	}
+
+	private static void handAbility(FxPack p, String name) {
+		Vec3 body = heroBody(), feet = heroFeet();
+		if (body == null) return;
+		String n = name.toLowerCase(java.util.Locale.ROOT);
+		Vec3 wand = attachmentWorld("weapon_top_fx");
+		Supplier<Vec3> horn = () -> {
+			Vec3 h = attachmentWorld("horn_tip_fx");
+			return h != null ? h : heroBody();
+		};
+		String played;
+		if (n.contains("radiantblast")) {
+			play(CelesteFx.radiantBlast(p, wand != null ? wand : body, aimDirection(), nextSeed()));
+			played = "Radiant Blast's cast (its bullets come as ability shots)";
+		} else if (n.contains("prismaticguard")) {
+			play(CelesteFx.prismaticGuard(p, horn, Effects::heroBody, nextSeed()));
+			played = "Prismatic Guard";
+		} else if (n.contains("luminousstrike")) {
+			Vec3 target = aimTarget(STRIKE_RANGE);
+			play(CelesteFx.luminousStrike(p, horn, target, nextSeed()));
+			played = String.format("Luminous Strike at %.1f blocks", target.distanceTo(body));
+		} else if (n.contains("dazzlingorb")) {
+			played = "nothing (the orb charges while channelling and flies when let go)";
+		} else if (n.contains("ability_dash")) {
+			Vec3 dir = new Vec3(heroVelocity.x, 0, heroVelocity.z);
+			if (dir.lengthSqr() < 1) dir = aimFrame()[0];
+			dir = dir.normalize();
+			play(CelesteFx.dash(p, Effects::heroBody, feet, dir, nextSeed()));
+			if (heroGrounded) blockDust(feet, 10, dir, 0.12);
+			played = "dash";
+		} else if (n.contains("ability_jump")) {
+			if (airTime > AIR_JUMP_S) {
+				play(CelesteFx.airJump(p, feet, nextSeed()));
+				played = "air jump";
+			} else {
+				blockDust(feet, 8, null, 0.08);
+				played = "ground jump dust";
+			}
+		} else if (n.contains("melee")) {
+			Vec3 at = wand != null ? wand : body;
+			play(CelesteFx.radiantHit(p, at, aimDirection(), nextSeed()));
+			played = "melee pop at the wand";
+		} else {
+			played = "nothing";
+		}
+		if (abilitiesLogged.add(n + played)) FxPack.LOG.info("Deadcraft: ability {}: plays {}", name, played);
+	}
+
+	private static Vfx orbChargeFx;
+	private static boolean orbHeld;
+
+	/** The orb charges at the wand while she channels it, and flies when she lets go. */
+	private static void handChanneling(boolean on) {
+		if (on && !orbHeld) {
+			FxPack p = pack();
+			if (p != null) orbChargeFx = play(CelesteFx.orbCharge(p, () -> orbHeld ? attachmentWorld("weapon_top_fx") : null, nextSeed()));
+		} else if (!on && orbHeld) {
+			if (orbChargeFx != null) orbChargeFx.stop();
+			orbChargeFx = null;
+			throwOrb();
+		}
+		orbHeld = on;
+	}
+
+	/** The orb flies straight along her aim from the wand and bursts on the first block it meets, or at its reach. */
+	private static void throwOrb() {
+		FxPack p = pack();
+		var mc = Minecraft.getInstance();
+		Vec3 start = attachmentWorld("weapon_top_fx");
+		if (start == null) start = heroBody();
+		if (p == null || mc.level == null || start == null) return;
+		Vec3 dir = aimDirection();
+		Vec3[] at = {start};
+		double[] travelled = {0};
+		boolean[] done = {false};
+		Vfx flight = CelesteFx.orbFlight(p, () -> done[0] ? null : at[0], nextSeed());
+		FxPack.LOG.info("Deadcraft: Dazzling Orb thrown");
+		play(new Vfx() {
+			@Override
+			public boolean tick(float dt) {
+				if (!done[0] && mc.level != null) {
+					Vec3 next = at[0].add(dir.scale(ORB_SPEED * dt));
+					HitResult hit = mc.level.clip(new ClipContext(at[0], next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+					boolean landed = hit.getType() != HitResult.Type.MISS;
+					Vec3 end = landed ? hit.getLocation() : next;
+					travelled[0] += end.distanceTo(at[0]);
+					at[0] = end;
+					if (landed || travelled[0] >= ORB_RANGE) {
+						done[0] = true;
+						Vec3 normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : dir.scale(-1);
+						play(CelesteFx.orbBurst(p, end, normal, nextSeed()));
+					}
+				}
+				return flight.tick(dt);
+			}
+
+			@Override
+			public void draw(Vec3 eye, Vec3 right, Vec3 up, Out out) {
+				flight.draw(eye, right, up, out);
+			}
+
+			@Override
+			public void stop() {
+				flight.stop();
+			}
+		});
+	}
+
+	/** In the air this long (seconds), a jump is an air jump. */
+	private static final double AIR_JUMP_S = 0.12;
+	private static boolean heroGrounded = true;
+	private static Vec3 heroVelocity = Vec3.ZERO;
+	private static double airTime, fallSpeed, slideCarry;
+	private static long lastMoveNanos;
+
+	/**
+	 * Every linked frame: whether the hero is on the ground and sliding, and its velocity (blocks/s). Kicks up the
+	 * ground's own dust (Minecraft's block particles) when she lands hard and while she slides.
+	 */
+	public static void movement(boolean grounded, boolean sliding, Vec3 velocity) {
+		long now = System.nanoTime();
+		double dt = lastMoveNanos == 0 ? 0 : Math.min(0.1, (now - lastMoveNanos) / 1e9);
+		lastMoveNanos = now;
+		boolean wasGrounded = heroGrounded;
+		heroGrounded = grounded;
+		heroVelocity = velocity;
+		Vec3 feet = broken || !handBuilt() ? null : heroFeet();
+		if (!grounded) {
+			airTime += dt;
+			fallSpeed = Math.max(fallSpeed, -velocity.y);
+			return;
+		}
+		if (!wasGrounded && feet != null && airTime > 0.3 && fallSpeed > 6) blockDust(feet, 14, null, 0.1);
+		airTime = 0;
+		fallSpeed = 0;
+		double speed = Math.hypot(velocity.x, velocity.z);
+		if (sliding && speed > 3 && feet != null) {
+			Vec3 dir = new Vec3(velocity.x / speed, 0, velocity.z / speed);
+			slideCarry += 40 * dt;
+			int n = (int) slideCarry;
+			slideCarry -= n;
+			if (n > 0) blockDust(feet, n, dir, 0.08);
+		}
+	}
+
+	/**
+	 * Dust from the block under {@code feet}: {@code n} of Minecraft's block particles thrown out round the feet
+	 * (blocks/tick), and back from {@code dir} if given.
+	 */
+	private static void blockDust(Vec3 feet, int n, Vec3 dir, double speed) {
+		var mc = Minecraft.getInstance();
+		if (mc.level == null || feet == null) return;
+		BlockState state = mc.level.getBlockState(BlockPos.containing(feet.x, feet.y - 0.25, feet.z));
+		if (state.isAir()) return;
+		var dust = new BlockParticleOption(ParticleTypes.BLOCK, state);
+		java.util.concurrent.ThreadLocalRandom r = java.util.concurrent.ThreadLocalRandom.current();
+		for (int i = 0; i < n; i++) {
+			double a = r.nextDouble() * Math.PI * 2, c = Math.cos(a), s = Math.sin(a), d = r.nextDouble() * 0.35;
+			double vx = c * speed, vz = s * speed;
+			if (dir != null) {
+				vx = vx * 0.5 - dir.x * speed;
+				vz = vz * 0.5 - dir.z * speed;
+			}
+			mc.level.addParticle(dust, feet.x + c * d, feet.y + 0.05, feet.z + s * d, vx, 0.05 + r.nextDouble() * 0.1, vz);
+		}
+	}
+
+	/** About the middle of the hero's body (the player's position is her feet). */
+	private static Vec3 heroBody() {
+		Vec3 f = heroFeet();
+		return f == null ? null : f.add(0, 0.8, 0);
+	}
+
+	/** Where the camera looks (the crosshair's ray). */
+	private static Vec3 aimDirection() {
+		var f = Minecraft.getInstance().gameRenderer.mainCamera().forwardVector();
+		return new Vec3(f.x(), f.y(), f.z()).normalize();
+	}
+
+	/** The first block on the crosshair's ray within {@code range}, or the ray's end; then down onto the ground. */
+	private static Vec3 aimTarget(double range) {
+		var mc = Minecraft.getInstance();
+		Vec3 eye = mc.gameRenderer.mainCamera().position(), end = eye.add(aimDirection().scale(range));
+		if (mc.level == null) return end;
+		HitResult hit = mc.level.clip(new ClipContext(eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+		Vec3 t = hit.getType() != HitResult.Type.MISS ? hit.getLocation() : end;
+		HitResult down = mc.level.clip(new ClipContext(t.add(0, 0.1, 0), t.add(0, -40, 0), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
+		return down.getType() != HitResult.Type.MISS ? down.getLocation() : t;
+	}
+
 	// ---- per frame -------------------------------------------------------------------------------
 
 	private static void render(LevelRenderContext ctx) {
@@ -428,6 +661,7 @@ public final class Effects {
 	}
 
 	private static void renderUnsafe(LevelRenderContext ctx) {
+		frameCount++;
 		Bloom.begin();
 		maintainWand();
 		if (active.isEmpty() && hand.isEmpty() && handStarting.isEmpty()) {
@@ -464,15 +698,16 @@ public final class Effects {
 		handStarting.clear();
 		if ((active.isEmpty() && hand.isEmpty()) || pack == null) return;
 
-		Map<String, Bucket> buckets = new LinkedHashMap<>();
+		// Last frame's buckets, emptied (their arrays are kept: no per-frame garbage). Additive and blended apart.
+		for (Bucket b : buckets.values()) b.count = 0;
+		for (Bucket b : blendedBuckets.values()) b.count = 0;
 		float[] right = {-left.x(), left.z(), -left.y()}, upSrc = {up.x(), -up.z(), up.y()};
 		float size = FxSettings.size(), brightness = FxSettings.brightness();
 		for (Active a : active) {
 			float[] eyeSrc = {(float) ((eye.x - a.ox) * UNITS_PER_BLOCK), (float) (-(eye.z - a.oz) * UNITS_PER_BLOCK), (float) ((eye.y - a.oy) * UNITS_PER_BLOCK)};
 			float bx = (float) (a.ox - eye.x), by = (float) (a.oy - eye.y), bz = (float) (a.oz - eye.z);
 			Renderers.draw(a.system, pack, new Renderers.View(eyeSrc, right, upSrc), (texture, add, xyz, uv, argb, bright) -> {
-				String key = (add ? "+" : "~") + texture;
-				Bucket b = buckets.computeIfAbsent(key, k -> new Bucket(texture, add));
+				Bucket b = bucket(texture, add);
 				// The size setting grows each card about its centre.
 				float cx = (xyz[0] + xyz[3] + xyz[6] + xyz[9]) / 4, cy = (xyz[1] + xyz[4] + xyz[7] + xyz[10]) / 4, cz = (xyz[2] + xyz[5] + xyz[8] + xyz[11]) / 4;
 				for (int i = 0; i < 4; i++) {
@@ -486,7 +721,7 @@ public final class Effects {
 		Vec3 rightMc = new Vec3(-left.x(), -left.y(), -left.z()), upMc = new Vec3(up.x(), up.y(), up.z());
 		for (Vfx v : hand) {
 			v.draw(eye, rightMc, upMc, (texture, add, xyz, uv, argb, bright) -> {
-				Bucket b = buckets.computeIfAbsent((add ? "+" : "~") + texture, k -> new Bucket(texture, add));
+				Bucket b = bucket(texture, add);
 				float cx = (xyz[0] + xyz[3] + xyz[6] + xyz[9]) / 4, cy = (xyz[1] + xyz[4] + xyz[7] + xyz[10]) / 4, cz = (xyz[2] + xyz[5] + xyz[8] + xyz[11]) / 4;
 				for (int i = 0; i < 4; i++) {
 					b.add(cx + (xyz[i * 3] - cx) * size, cy + (xyz[i * 3 + 1] - cy) * size, cz + (xyz[i * 3 + 2] - cz) * size, uv[i * 2], uv[i * 2 + 1],
@@ -497,7 +732,22 @@ public final class Effects {
 		var collector = ctx.submitNodeCollector();
 		var poseStack = ctx.poseStack();
 		Bloom.pose(poseStack.last().pose());
-		for (Bucket b : buckets.values()) {
+		drawBuckets(blendedBuckets, collector, poseStack);
+		drawBuckets(buckets, collector, poseStack);
+		framesDrawn++;
+		drawNanos += System.nanoTime() - now;
+	}
+
+	/** This frame's cards by texture: additive and blended. */
+	private static final Map<String, Bucket> buckets = new LinkedHashMap<>(), blendedBuckets = new LinkedHashMap<>();
+
+	private static Bucket bucket(String texture, boolean additive) {
+		return (additive ? buckets : blendedBuckets).computeIfAbsent(texture, k -> new Bucket(texture, additive));
+	}
+
+	private static void drawBuckets(Map<String, Bucket> from, net.minecraft.client.renderer.SubmitNodeCollector collector, com.mojang.blaze3d.vertex.PoseStack poseStack) {
+		for (Bucket b : from.values()) {
+			if (b.count == 0) continue;
 			RenderType type = type(b.texture, b.additive);
 			if (type == null) continue;
 			drawnQuads += b.count / 4;
@@ -516,8 +766,6 @@ public final class Effects {
 				}
 			});
 		}
-		framesDrawn++;
-		drawNanos += System.nanoTime() - now;
 	}
 
 	/** Quads for one texture and blend: x, y, z, u, v per vertex, and its colour. */

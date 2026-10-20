@@ -18,9 +18,16 @@ public final class Glow implements Vfx {
 	private final float duration;
 	/** Size at the end of a flash, as a fraction of its start. */
 	private final float endSize;
+	/** A steady glow grows to {@link #endSize} over this many seconds (a charge), when above 0. */
+	private float charge;
 	private Vec3 at;
 	private float time, fadeOut = -1;
 	private final float phase;
+	private static final float FADE_S = 0.08f;
+	private static final int[][] SIGNS = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+	static final float[] UV = {0, 1, 1, 1, 1, 0, 0, 0};
+	private final float[] xyz = new float[12];
+	private final int[] argb = new int[4];
 
 	public Glow(Supplier<Vec3> anchor, String texture, float size, float[] color, float alpha, float brightness, float flicker, boolean additive,
 		float duration, float endSize) {
@@ -42,6 +49,20 @@ public final class Glow implements Vfx {
 		return new Glow(anchor, texture, size, color, alpha, brightness, flicker, true, -1, 1);
 	}
 
+	/** A steady glow that grows to {@code endSize} of its size over {@code chargeS} seconds (the orb charging). */
+	public static Glow charging(Supplier<Vec3> anchor, String texture, float size, float endSize, float chargeS, float[] color, float alpha,
+		float brightness, float flicker) {
+		Glow g = new Glow(anchor, texture, size, color, alpha, brightness, flicker, true, -1, endSize);
+		g.charge = chargeS;
+		return g;
+	}
+
+	/** A flash that follows a moving point (a glyph on the body). */
+	public static Glow flash(Supplier<Vec3> anchor, String texture, float size, float[] color, float alpha, float brightness, float duration,
+		float endSize) {
+		return new Glow(anchor, texture, size, color, alpha, brightness, 0, true, duration, endSize);
+	}
+
 	/** A flash: full at once, fading (and growing or shrinking to {@code endSize} of its size) over {@code duration}. */
 	public static Glow flash(Vec3 at, String texture, float size, float[] color, float alpha, float brightness, float duration, float endSize) {
 		return new Glow(() -> at, texture, size, color, alpha, brightness, 0, true, duration, endSize);
@@ -49,7 +70,7 @@ public final class Glow implements Vfx {
 
 	@Override
 	public void stop() {
-		if (fadeOut < 0) fadeOut = 0.08f;
+		if (fadeOut < 0) fadeOut = FADE_S;
 	}
 
 	@Override
@@ -71,21 +92,20 @@ public final class Glow implements Vfx {
 	@Override
 	public void draw(Vec3 eye, Vec3 right, Vec3 up, Out out) {
 		if (at == null) return;
-		float t = duration > 0 ? Math.min(1, time / duration) : 0;
-		float a = alpha * (duration > 0 ? (1 - t) * (1 - t) : 1) * (fadeOut >= 0 ? fadeOut / 0.08f : 1);
+		float t = duration > 0 ? Math.min(1, time / duration) : charge > 0 ? Math.min(1, time / charge) : 0;
+		float a = alpha * (duration > 0 ? (1 - t) * (1 - t) : 1) * (fadeOut >= 0 ? fadeOut / FADE_S : 1);
 		// Two out-of-step waves: an uneven flicker.
 		float f = 1 + flicker * (float) (0.6 * Math.sin(time * 23 + phase) + 0.4 * Math.sin(time * 37.7 + phase * 2));
 		float s = size * f * (1 + (endSize - 1) * t);
 		if (a <= 0.002f || s <= 0) return;
 		double cx = at.x - eye.x, cy = at.y - eye.y, cz = at.z - eye.z;
-		float[] xyz = new float[12];
-		int[][] signs = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
 		for (int k = 0; k < 4; k++) {
-			xyz[k * 3] = (float) (cx + right.x * s * signs[k][0] + up.x * s * signs[k][1]);
-			xyz[k * 3 + 1] = (float) (cy + right.y * s * signs[k][0] + up.y * s * signs[k][1]);
-			xyz[k * 3 + 2] = (float) (cz + right.z * s * signs[k][0] + up.z * s * signs[k][1]);
+			xyz[k * 3] = (float) (cx + right.x * s * SIGNS[k][0] + up.x * s * SIGNS[k][1]);
+			xyz[k * 3 + 1] = (float) (cy + right.y * s * SIGNS[k][0] + up.y * s * SIGNS[k][1]);
+			xyz[k * 3 + 2] = (float) (cz + right.z * s * SIGNS[k][0] + up.z * s * SIGNS[k][1]);
 		}
 		int col = Vfx.argb(color[0], color[1], color[2], a);
-		out.quad(texture, additive, xyz, new float[] {0, 1, 1, 1, 1, 0, 0, 0}, new int[] {col, col, col, col}, brightness * f);
+		argb[0] = argb[1] = argb[2] = argb[3] = col;
+		out.quad(texture, additive, xyz, UV, argb, brightness * f);
 	}
 }

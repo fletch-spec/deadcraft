@@ -7,7 +7,9 @@ import net.minecraft.world.phys.Vec3;
 /**
  * Hand-tuned particles: emitted at an anchor (a point that may move: the wand's end), each living a while,
  * moving, growing or shrinking, changing colour and fading. Parts spawned while the anchor moves are spread
- * along its path, so a swung wand leaves a continuous trail.
+ * along its path, so a swung wand leaves a continuous trail; {@link Spec#local() local} parts instead ride
+ * the anchor (a flame that stays on the wand), and {@link Spec#perBlock(float) per-block} emission makes parts
+ * only while the anchor moves (a short smear behind a swing).
  */
 public final class Emitter implements Vfx {
 	/** How a card faces the camera. */
@@ -49,6 +51,12 @@ public final class Emitter implements Vfx {
 		/** How much of the anchor's own velocity parts start with. */
 		float inherit;
 		Orient orient = Orient.FACING;
+		/** Parts move with the anchor (their positions are offsets from it). */
+		boolean local;
+		/** Parts per block the anchor moves, on top of {@link #rate}. */
+		float perBlock;
+		/** Each part a random bright hue instead of the colour stops (prismatic sparkles). */
+		boolean rainbow;
 		/** Random starting roll (radians, either way) and spin (radians/s, either way). */
 		float roll, spin;
 
@@ -75,6 +83,9 @@ public final class Emitter implements Vfx {
 		Spec inherit(float f) { inherit = f; return this; }
 		Spec orient(Orient o) { orient = o; return this; }
 		Spec roll(float r, float s) { roll = r; spin = s; return this; }
+		Spec local() { local = true; return this; }
+		Spec perBlock(float n) { perBlock = n; return this; }
+		Spec rainbow() { rainbow = true; return this; }
 	}
 
 	private final Spec spec;
@@ -85,7 +96,7 @@ public final class Emitter implements Vfx {
 	private final FxPack pack;
 	private int count;
 	private double[] pos = new double[3 * 16], vel = new double[3 * 16];
-	private float[] age = new float[16], life = new float[16], size = new float[16], roll = new float[16], spin = new float[16];
+	private float[] age = new float[16], life = new float[16], size = new float[16], roll = new float[16], spin = new float[16], hue = new float[16];
 	private int[] seq = new int[16], frameOffset = new int[16];
 	private Vec3 last;
 	private float time, carry;
@@ -137,16 +148,17 @@ public final class Emitter implements Vfx {
 				n += spec.burst;
 				burstDone = true;
 			}
-			carry += spec.rate * dt;
+			carry += spec.rate * dt + (float) (spec.perBlock * now.distanceTo(from));
 			int steady = (int) carry;
 			carry -= steady;
 			for (int i = 0; i < n + steady; i++) {
 				// Steady parts spread along the anchor's path this frame, burst ones at its point now.
 				float along = i < n ? 1 : (i - n + rng.nextFloat()) / Math.max(1, steady);
-				spawn(from.lerp(now, along), anchorVel, dt * (1 - along));
+				// Local parts are offsets from the anchor: they start on it.
+				spawn(spec.local ? Vec3.ZERO : from.lerp(now, along), spec.local ? Vec3.ZERO : anchorVel, dt * (1 - along));
 			}
 		}
-		last = now;
+		if (now != null) last = now;
 		time += dt;
 		return emitting || count > 0;
 	}
@@ -172,6 +184,7 @@ public final class Emitter implements Vfx {
 		size[i] = 1 + (rng.nextFloat() * 2 - 1) * spec.sizeJitter;
 		roll[i] = (rng.nextFloat() * 2 - 1) * spec.roll;
 		spin[i] = (rng.nextFloat() * 2 - 1) * spec.spin;
+		hue[i] = rng.nextFloat();
 		seq[i] = spec.sequence >= 0 ? spec.sequence : rng.nextInt(1 << 16);
 		frameOffset[i] = rng.nextInt(1 << 16);
 	}
@@ -193,6 +206,7 @@ public final class Emitter implements Vfx {
 		size[i] = size[last];
 		roll[i] = roll[last];
 		spin[i] = spin[last];
+		hue[i] = hue[last];
 		seq[i] = seq[last];
 		frameOffset[i] = frameOffset[last];
 	}
@@ -206,6 +220,7 @@ public final class Emitter implements Vfx {
 		size = java.util.Arrays.copyOf(size, n);
 		roll = java.util.Arrays.copyOf(roll, n);
 		spin = java.util.Arrays.copyOf(spin, n);
+		hue = java.util.Arrays.copyOf(hue, n);
 		seq = java.util.Arrays.copyOf(seq, n);
 		frameOffset = java.util.Arrays.copyOf(frameOffset, n);
 	}
@@ -215,15 +230,16 @@ public final class Emitter implements Vfx {
 		if (count == 0) return;
 		FxPack.Sheet sheet = pack == null ? null : pack.sheet(spec.texture);
 		Vec3 view = up.cross(right);  // towards the camera
-		float[] xyz = new float[12], uv = new float[8], rect = new float[4];
-		int[] argb = new int[4];
+		float[] xyz = this.xyz, uv = this.uv, rect = this.rect;
+		int[] argb = this.argb;
 		for (int i = 0; i < count; i++) {
 			float t = age[i] / life[i];
 			float s = (spec.sizeStart + (spec.sizeEnd - spec.sizeStart) * t) * size[i];
 			float a = spec.alpha * fade(t);
 			if (s <= 0 || a <= 0.002f) continue;
 			int o = i * 3;
-			double cx = pos[o] - eye.x, cy = pos[o + 1] - eye.y, cz = pos[o + 2] - eye.z;
+			double ox = spec.local && last != null ? last.x : 0, oy = spec.local && last != null ? last.y : 0, oz = spec.local && last != null ? last.z : 0;
+			double cx = pos[o] + ox - eye.x, cy = pos[o + 1] + oy - eye.y, cz = pos[o + 2] + oz - eye.z;
 			Vec3 ax, ay;  // half extents across and along
 			if (spec.orient == Orient.FACING) {
 				double c = Math.cos(roll[i]), sn = Math.sin(roll[i]);
@@ -250,7 +266,7 @@ public final class Emitter implements Vfx {
 			uv[2] = rect[2]; uv[3] = rect[3];
 			uv[4] = rect[2]; uv[5] = rect[1];
 			uv[6] = rect[0]; uv[7] = rect[1];
-			float[] c = color(t);
+			float[] c = spec.rainbow ? rainbow(hue[i]) : color(t);
 			int col = Vfx.argb(c[0], c[1], c[2], a);
 			argb[0] = argb[1] = argb[2] = argb[3] = col;
 			out.quad(spec.texture, spec.additive, xyz, uv, argb, spec.brightness);
@@ -269,6 +285,19 @@ public final class Emitter implements Vfx {
 		return Math.max(0, Math.min(in, out));
 	}
 
+	/** Scratch for drawing (one emitter draws on the render thread only). */
+	private final float[] xyz = new float[12], uv = new float[8], rect = new float[4], rgb = new float[3];
+	private final int[] argb = new int[4];
+
+	/** A bright, slightly pastel hue (0..1 round the wheel). */
+	private float[] rainbow(float h) {
+		float h6 = h * 6;
+		rgb[0] = 0.35f + 0.65f * Math.max(0, Math.min(1, Math.abs(h6 - 3) - 1));
+		rgb[1] = 0.35f + 0.65f * Math.max(0, Math.min(1, 2 - Math.abs(h6 - 2)));
+		rgb[2] = 0.35f + 0.65f * Math.max(0, Math.min(1, 2 - Math.abs(h6 - 4)));
+		return rgb;
+	}
+
 	private float[] color(float t) {
 		float[] a = spec.colorStart, b = spec.colorEnd;
 		float u = t;
@@ -281,7 +310,10 @@ public final class Emitter implements Vfx {
 				u = (t - 0.5f) * 2;
 			}
 		}
-		return new float[] {a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u};
+		rgb[0] = a[0] + (b[0] - a[0]) * u;
+		rgb[1] = a[1] + (b[1] - a[1]) * u;
+		rgb[2] = a[2] + (b[2] - a[2]) * u;
+		return rgb;
 	}
 
 	/** The part's sheet frame (u0 v0 u1 v1), or the whole texture. */

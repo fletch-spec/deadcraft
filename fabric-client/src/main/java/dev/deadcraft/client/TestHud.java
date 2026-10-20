@@ -1,6 +1,8 @@
 package dev.deadcraft.client;
 
 import dev.deadcraft.client.hero.HeroRenderer;
+import java.lang.management.GarbageCollectorMXBean;
+import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
@@ -20,6 +22,12 @@ final class TestHud {
 	private static double frameSum, frameMax, ageSum, ageMax;
 	private static int ageSamples;
 	private static double lastFrameTime;
+	/** Frames over this are stutters: counted, with how many had a garbage collection during them. */
+	private static final double SPIKE_MS = 25;
+	private static final List<GarbageCollectorMXBean> collectors = ManagementFactory.getGarbageCollectorMXBeans();
+	private static long gcCount, gcTime, windowGcCount, windowGcTime;
+	private static int spikes, gcSpikes;
+	private static double spikeMax;
 
 	private TestHud() {}
 
@@ -36,6 +44,21 @@ final class TestHud {
 			frameSum += dt;
 			frameMax = Math.max(frameMax, dt);
 		}
+		long count = 0, time = 0;
+		for (GarbageCollectorMXBean gc : collectors) {
+			count += Math.max(0, gc.getCollectionCount());
+			time += Math.max(0, gc.getCollectionTime());
+		}
+		if (lastFrameTime > 0) {
+			double dt = (now - lastFrameTime) * 1000;
+			if (dt > SPIKE_MS) {
+				spikes++;
+				spikeMax = Math.max(spikeMax, dt);
+				if (count != gcCount) gcSpikes++;
+			}
+		}
+		gcCount = count;
+		gcTime = time;
 		lastFrameTime = now;
 		ageSum += sampleAgeMs;
 		ageMax = Math.max(ageMax, sampleAgeMs);
@@ -50,11 +73,23 @@ final class TestHud {
 		lines.add(String.format("%.0f fps  frame %.2f ms avg, %.1f ms worst  weather %s", frames / (frameSum / 1000), frameSum / Math.max(1, frames), frameMax,
 			level == null ? "?" : level.isThundering() ? "thunder" : level.isRaining() ? "rain" : "clear"));
 		lines.add(String.format("deadlock sample age %.1f ms avg, %.1f max", ageSum / Math.max(1, ageSamples), ageMax));
+
 		lines.add(Follow.timelineHudLine());
 		lines.add(Follow.lookHudLine());
 		lines.add(HeroRenderer.hudLine());
 		frames = ageSamples = 0;
 		frameSum = frameMax = ageSum = ageMax = 0;
+	}
+
+	/** Stutters and garbage collections since the last call (the 10 s log line). */
+	static String stutterLine() {
+		String line = String.format("stutters over %.0f ms: %d (worst %.0f ms, %d during a garbage collection); gc %d pauses, %d ms", SPIKE_MS, spikes,
+			spikeMax, gcSpikes, gcCount - windowGcCount, gcTime - windowGcTime);
+		spikes = gcSpikes = 0;
+		spikeMax = 0;
+		windowGcCount = gcCount;
+		windowGcTime = gcTime;
+		return line;
 	}
 
 	/** The last refresh's lines, for the log. */

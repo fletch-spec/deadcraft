@@ -21,6 +21,15 @@ final class HeroTimeline {
 	/** How fast the clock offset estimate follows a later (slower) arrival, per sample. */
 	private static final double OFFSET_RISE = 0.01;
 
+	/**
+	 * The Deadlock server's clock for a tick, in seconds. Taken from the tick count, not the server's CurTime:
+	 * from mid-October 2026 the CurTime the plugin reads stopped advancing while ticks kept coming (64 a second,
+	 * measured over 23 minutes), so every frame ran past the newest sample and the hero moved in 64 Hz steps.
+	 */
+	static double serverTime(long tick) {
+		return tick * TICK_S;
+	}
+
 	record Sample(long tick, double serverTime, double x, double y, double z, float yaw, float pitch,
 		double vx, double vy, double vz) {}
 
