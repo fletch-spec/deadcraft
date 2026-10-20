@@ -364,19 +364,14 @@ public final class CelesteFx {
 	// ---- movement ---------------------------------------------------------------------------------
 
 	/**
-	 * A dash along {@code dir}. In the air (the recordings): a purple ring round her across the dash, white speed
-	 * lines and a smoky white ring ahead of her, purple stars. On the ground only faint lines.
+	 * An air dash along {@code dir} (the recordings): a purple ring round her across the dash, a smoky white ring
+	 * ahead of her, a soft blue wake behind her and purple stars. (Speed lines read as distracting straight
+	 * strokes: round 9.)
 	 */
 	static Vfx dash(FxPack pack, Supplier<Vec3> body, Vec3 dir, boolean air, long seed) {
-		Vec3 at = body.get(), ahead = at.add(dir.scale(1.2));
-		// Streaks drawn out over a moment, each its own length and speed (all at once they looked like rigid bars).
-		Emitter lines = new Emitter(new Emitter.Spec().texture(BEAM).rate(air ? 70 : 40).duration(0.2f).life(0.12f, 0.28f).size(0.008f, 0.002f).stretch(5)
-			.color(WHITE, WHITE_BLUE).alpha(air ? 0.55f : 0.3f, 0.3f, 0.6f).brightness(1.5f).velocity(dir.x * 0.45, dir.y * 0.45, dir.z * 0.45, 0.25f)
-			.drag(2).spawnRadius(0.55f).orient(Emitter.Orient.STREAK), pack, () -> {
-				Vec3 b = body.get();
-				return b == null ? null : air ? b.add(dir.scale(1.2)) : b;
-			}, null, seed);
-		if (!air) return lines;
+		Vec3 at = body.get();
+		float[] clock = {0};
+		Ribbon lines = new Ribbon(() -> clock[0] > 0.25f ? null : body.get(), GLOW, 0.3f, 0.2f, LIGHT_BLUE, BLUE, 0.35f, 1.2f);
 		Vec3 front = at.add(dir.scale(2.2));
 		Ring wake = new Ring(front, dir, RING, 0.4f, 0.75f, 0.45f, WHITE, 0.55f, 1.2f, true);
 		Emitter smoke = new Emitter(new Emitter.Spec().texture(SMOKE).blended().burst(6).duration(0.01f).life(0.35f, 0.6f).size(0.18f, 0.35f)
@@ -385,7 +380,7 @@ public final class CelesteFx {
 		Ring ring = new Ring(at, dir, RING, 0.6f, 1.05f, 0.35f, PINK_VIOLET, 0.8f, 1.5f, true);
 		Emitter stars = new Emitter(new Emitter.Spec().texture(SPARKLE).burst(5).duration(0.01f).life(0.4f, 0.7f).size(0.05f, 0.015f).color(PINK_VIOLET, VIOLET)
 			.alpha(1, 0.05f, 0.5f).brightness(2.5f).spawnRadius(0.6f).velocityRandom(0.3f).drag(2), pack, () -> at, null, seed + 1);
-		return Vfx.group(smoke, wake, ring, lines, stars);
+		return Vfx.clocked(clock, Vfx.group(smoke, wake, ring, lines, stars));
 	}
 
 	/**

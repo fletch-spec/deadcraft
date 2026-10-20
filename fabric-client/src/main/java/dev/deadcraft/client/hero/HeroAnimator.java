@@ -120,10 +120,16 @@ public final class HeroAnimator {
 	 * quicker.
 	 */
 	private record CastPace(float from, float rate, float until) {}
+	/** After the orb's cast, no hold within this (seconds) is a quick release: thrown at once. */
+	static final float ORB_QUICK_S = 0.15f;
 	private static final java.util.Map<String, CastPace> CAST_PACE = java.util.Map.of(
 		"ability_unicorn_radiant_blast", new CastPace(0.35f, 2, 0.95f),
 		ORB_START, new CastPace(0, 1.4f, 0.5f));
 	private float paceUntil = -1;
+	/** Whether any ability-ready bit has come (if none ever does, a press is taken as ready). */
+	private boolean readySeen;
+	/** When the orb's cast event came, in action time (-1: not yet). */
+	private float orbCastAt = -1;
 
 	/** Deadlock's InputButton bit for signature ability {@code slot} (0 to 3). */
 	static long abilityButton(int slot) {
@@ -365,10 +371,15 @@ public final class HeroAnimator {
 		for (int i = 0; i < SLOT_NAMES.length; i++) if (name.contains(SLOT_NAMES[i])) slot = i;
 		if (slot >= 0 && slot == pendingSlot) {
 			pendingSlot = -1;
+			if (slot == 3 && action == Action.ORB) orbCastAt = actionTime;
 			return;
 		}
-		if (slot == 3) startOrb();
-		else startAction(Action.CAST, slot < 0 ? "cast_start" : slot == 2 ? "throw" : SLOT_CLIPS[slot]);
+		if (slot == 3) {
+			startOrb();
+			if (action == Action.ORB) orbCastAt = actionTime;
+		} else {
+			startAction(Action.CAST, slot < 0 ? "cast_start" : slot == 2 ? "throw" : SLOT_CLIPS[slot]);
+		}
 	}
 
 	private void startAction(Action kind, String clip) {
@@ -382,6 +393,7 @@ public final class HeroAnimator {
 		actionTime = 0;
 		actionDone = actionCancelled = false;
 		orbChanneled = heavy = false;
+		orbCastAt = -1;
 		actionRate = 1;
 		pendingSlot = -1;
 		combatTime = 0;
@@ -641,7 +653,10 @@ public final class HeroAnimator {
 		stance = approach(stance, combatTime < COMBAT_HOLD_S ? 1 : 0, dt / STANCE_S);
 
 		for (int slot = 0; slot < SLOT_CLIPS.length; slot++) {
-			if ((pressed & abilityButton(slot)) == 0 || SLOT_CLIPS[slot] == null || (in.abilitiesReady() & 1 << slot) == 0) continue;
+			// Round 9: casts only ever started on their events (a beat late): the ready bits may never come. Until one
+			// has, a press counts as ready; the event confirms it or the cast is cancelled (CONFIRM_S).
+			if (in.abilitiesReady() != 0) readySeen = true;
+			if ((pressed & abilityButton(slot)) == 0 || SLOT_CLIPS[slot] == null || readySeen && (in.abilitiesReady() & 1 << slot) == 0) continue;
 			if (slot == 3) startOrb();
 			else startAction(Action.CAST, SLOT_CLIPS[slot]);
 			if (actionClip.equals(SLOT_CLIPS[slot]) && actionTime == 0) {
@@ -724,7 +739,9 @@ public final class HeroAnimator {
 				actionDone = !shooting;
 			}
 			case ORB -> {
-				if (!actionDone && !in.channeling() && (orbChanneled || actionTime > 3)) {
+				// Thrown when the hold ends, or at once on a quick release: the cast came and no hold followed.
+				boolean quick = orbCastAt >= 0 && !orbChanneled && actionTime - orbCastAt > ORB_QUICK_S;
+				if (!actionDone && !in.channeling() && (orbChanneled || quick || actionTime > 3)) {
 					// Thrown: the release, crossfaded from wherever the raise or the hold had got to.
 					switchClip(in.grounded() ? "ability_unicorn_dazzlingorb_end" : "ability_unicorn_dazzlingorb_inair_end", 0);
 					actionDone = true;

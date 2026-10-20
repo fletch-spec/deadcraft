@@ -64,6 +64,8 @@ public final class Follow {
 	private static final LookPredictor look = new LookPredictor(rawMouse);
 	private static boolean rawLook = true;
 	private static long lastLookTick = -1;
+	private static long lastButtons;
+	private static int abilityPressLogs;
 	/** Seconds Deadlock's CurTime lags its tick count (logged: it stopped advancing in October 2026, see {@link HeroTimeline#serverTime}). */
 	private static double curTimeDrift;
 	private static int lastAbilitySerial = -1;
@@ -152,6 +154,15 @@ public final class Follow {
 		lastDisplacement = new Vec3(heroBlocks.x() - heroAnchor.x(), heroBlocks.y() - heroAnchor.y(), heroBlocks.z() - heroAnchor.z());
 
 		DeadlockCamera.setEyeHeight(hero.eyePosition.z() - hero.position.z(), HeroRenderer.sliding(), localNow);
+		// Ability presses (a beat before their events: Deadlock's sounds play on the press).
+		long abilityPressed = hero.buttons & ~lastButtons;
+		lastButtons = hero.buttons;
+		for (int slot = 0; slot < 4; slot++) {
+			if ((abilityPressed & (0x200000000L << slot)) != 0) {
+				if (abilityPressLogs++ < 12) LOG.info("Deadcraft: ability {} pressed, ready bits {}", slot + 1, Integer.toBinaryString(hero.abilitiesReady));
+				Effects.abilityPressed(slot, hero.abilitiesReady);
+			}
+		}
 		// Before the ability events: an air jump is told from a ground one by time in the air.
 		Vec3 heroVelocity = Proto.toMinecraft(hero.velocity);
 		Effects.movement((hero.flags & HeroFlags.ON_GROUND) != 0, HeroRenderer.sliding(),

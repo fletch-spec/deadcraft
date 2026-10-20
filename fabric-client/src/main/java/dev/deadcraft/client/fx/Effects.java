@@ -458,6 +458,45 @@ public final class Effects {
 		return seed++ * 7919;
 	}
 
+	private static boolean readySeen;
+	private static long blastPressedAt, orbPressedAt, orbCastAt;
+	private static boolean orbChannelSeen;
+	/** A press counts for its ability's event coming within this (nanoseconds). */
+	private static final long PRESS_WINDOW = 1_200_000_000L;
+	/** After the orb's cast, no hold within this is a quick release (the animator's ORB_QUICK_S). */
+	private static final long ORB_QUICK_NANOS = 150_000_000L;
+
+	/**
+	 * An ability's button pressed ({@code slot} 0 to 3), with the ready bits. Deadlock plays the cast's sound on the
+	 * press, its event comes after the cast delay: Radiant Blast's burst and the orb's charge start here.
+	 */
+	public static void abilityPressed(int slot, int readyBits) {
+		if (readyBits != 0) readySeen = true;
+		if (broken || !handBuilt() || readySeen && (readyBits & 1 << slot) == 0) return;
+		FxPack p = pack();
+		if (p == null) return;
+		long now = System.nanoTime();
+		if (slot == 0) {
+			Vec3 body = heroBody(), wand = wandTip();
+			if (body == null) return;
+			blastPressedAt = now;
+			play(CelesteFx.radiantBlast(p, wand != null ? wand : body, aimDirection(), heroFeet(), nextSeed()));
+		} else if (slot == 3 && !orbHeld) {
+			orbPressedAt = now;
+			orbCastAt = 0;
+			orbChannelSeen = false;
+			startOrbCharge(p);
+		}
+	}
+
+	private static void startOrbCharge(FxPack p) {
+		orbHeld = true;
+		orbChargeFx = play(CelesteFx.orbCharge(p, () -> orbHeld ? wandTip() : null, () -> {
+			Vec3 h = orbHeld ? attachmentWorld("horn_tip_fx") : null;
+			return h != null || !orbHeld ? h : heroBody();
+		}, nextSeed()));
+	}
+
 	private static void handAbility(FxPack p, String name) {
 		Vec3 body = heroBody(), feet = heroFeet();
 		if (body == null) return;
@@ -469,7 +508,7 @@ public final class Effects {
 		};
 		String played;
 		if (n.contains("radiantblast")) {
-			play(CelesteFx.radiantBlast(p, wand != null ? wand : body, aimDirection(), feet, nextSeed()));
+			if (System.nanoTime() - blastPressedAt > PRESS_WINDOW) play(CelesteFx.radiantBlast(p, wand != null ? wand : body, aimDirection(), feet, nextSeed()));
 			played = "Radiant Blast's cast (its bullets come as ability shots)";
 		} else if (n.contains("prismaticguard")) {
 			play(CelesteFx.prismaticGuard(p, horn, Effects::heroBody, nextSeed()));
@@ -480,13 +519,20 @@ public final class Effects {
 			play(CelesteFx.luminousStrike(p, horn, target, new Vec3(-left.x(), 0, -left.z()).normalize(), nextSeed()));
 			played = String.format("Luminous Strike %.1f blocks away", target.distanceTo(feet));
 		} else if (n.contains("dazzlingorb")) {
-			played = "nothing (the orb charges while channelling and flies when let go)";
+			// The cast: thrown at once unless a hold follows (a quick release).
+			if (!orbHeld) {
+				orbChannelSeen = false;
+				startOrbCharge(p);
+			}
+			orbCastAt = System.nanoTime();
+			played = "the orb's cast (held: flies when let go; quick release: flies now)";
 		} else if (n.contains("ability_dash")) {
 			Vec3 dir = new Vec3(heroVelocity.x, 0, heroVelocity.z);
 			if (dir.lengthSqr() < 1) dir = aimFrame()[0];
 			dir = dir.normalize();
-			play(CelesteFx.dash(p, Effects::heroBody, dir, !heroGrounded, nextSeed()));
+			// On the ground Deadlock shows nothing but the dust it kicks up.
 			if (heroGrounded) blockDust(feet, 10, dir, 0.12);
+			else play(CelesteFx.dash(p, Effects::heroBody, dir, true, nextSeed()));
 			played = heroGrounded ? "ground dash" : "air dash";
 		} else if (n.contains("ability_jump")) {
 			if (airTime > AIR_JUMP_S) {
@@ -509,22 +555,35 @@ public final class Effects {
 	private static Vfx orbChargeFx;
 	private static boolean orbHeld;
 
-	/** The orb charges at the wand while she channels it, and flies when she lets go. */
+	/**
+	 * The orb shows from the press (or its cast event), and flies when the hold ends, or at once on a quick release
+	 * (the cast came and no hold followed); a press with no cast goes out.
+	 */
 	private static void handChanneling(boolean on) {
-		if (on && !orbHeld) {
-			FxPack p = pack();
-			if (p != null) {
-				orbChargeFx = play(CelesteFx.orbCharge(p, () -> orbHeld ? wandTip() : null, () -> {
-					Vec3 h = orbHeld ? attachmentWorld("horn_tip_fx") : null;
-					return h != null || !orbHeld ? h : heroBody();
-				}, nextSeed()));
+		long now = System.nanoTime();
+		if (on) {
+			orbChannelSeen = true;
+			if (!orbHeld) {
+				FxPack p = pack();
+				if (p != null) startOrbCharge(p);
 			}
-		} else if (!on && orbHeld) {
+			return;
+		}
+		if (!orbHeld) return;
+		boolean quick = orbCastAt > 0 && !orbChannelSeen && now - orbCastAt > ORB_QUICK_NANOS;
+		if (orbChannelSeen || quick) {
 			if (orbChargeFx != null) orbChargeFx.stop();
 			orbChargeFx = null;
+			orbHeld = false;
+			orbChannelSeen = false;
+			orbCastAt = 0;
 			throwOrb();
+		} else if (orbCastAt == 0 && now - orbPressedAt > PRESS_WINDOW) {
+			// Pressed, no cast came (on cooldown): the orb goes out.
+			if (orbChargeFx != null) orbChargeFx.stop();
+			orbChargeFx = null;
+			orbHeld = false;
 		}
-		orbHeld = on;
 	}
 
 	/** The orb flies straight along her aim from the wand and bursts on the first block it meets, or at its reach. */

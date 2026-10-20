@@ -766,4 +766,24 @@ class HeroRealPackTest {
 		}
 		return far;
 	}
+
+	/** Round 9: the ready bits never came, and casts only started on their events, a beat after the sound. */
+	@Test
+	void aPressStartsTheCastWhenNoReadyBitsCome() throws Exception {
+		HeroAnimator anim = new HeroAnimator(celeste());
+		anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.abilityButton(0), false, 0), 1 / 120f);
+		assertTrue(anim.debugLine().contains("CAST ability_unicorn_radiant_blast"), "the blast didn't start on the press: " + anim.debugLine());
+	}
+
+	/** Round 9: a quick release (the cast comes, no hold) waited 3 s to throw, after Deadlock's orb had flown. */
+	@Test
+	void aQuickOrbReleaseThrowsAtOnce() throws Exception {
+		HeroAnimator anim = new HeroAnimator(celeste());
+		var idle = new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, 0, false);
+		anim.update(new HeroAnimator.Input(0, 0, 0, true, 86, 112, HeroAnimator.Wall.NONE, 0, HeroAnimator.abilityButton(3), false, 0b1111), 1 / 120f);
+		for (int i = 0; i < 90; i++) anim.update(idle, 1 / 120f);
+		anim.ability("ability_unicorn_dazzlingorb", idle, Double.NaN);
+		for (int i = 0; i < 30; i++) anim.update(idle, 1 / 120f);
+		assertTrue(anim.debugLine().contains("ability_unicorn_dazzlingorb_end"), "not thrown 0.25 s after a quick release: " + anim.debugLine());
+	}
 }
