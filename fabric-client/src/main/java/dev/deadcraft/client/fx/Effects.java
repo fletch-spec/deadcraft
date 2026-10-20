@@ -462,7 +462,7 @@ public final class Effects {
 		Vec3 body = heroBody(), feet = heroFeet();
 		if (body == null) return;
 		String n = name.toLowerCase(java.util.Locale.ROOT);
-		Vec3 wand = attachmentWorld("weapon_top_fx");
+		Vec3 wand = wandTip();
 		Supplier<Vec3> horn = () -> {
 			Vec3 h = attachmentWorld("horn_tip_fx");
 			return h != null ? h : heroBody();
@@ -489,8 +489,8 @@ public final class Effects {
 			if (heroGrounded) blockDust(feet, 10, dir, 0.12);
 			played = heroGrounded ? "ground dash" : "air dash";
 		} else if (n.contains("ability_jump")) {
-			play(CelesteFx.jump(p, feet, airTime > AIR_JUMP_S, nextSeed()));
 			if (airTime > AIR_JUMP_S) {
+				play(CelesteFx.jump(p, feet, true, nextSeed()));
 				played = "air jump";
 			} else {
 				blockDust(feet, 8, null, 0.08);
@@ -498,7 +498,7 @@ public final class Effects {
 			}
 		} else if (n.contains("melee")) {
 			Vec3 at = wand != null ? wand : body;
-			play(CelesteFx.radiantHit(p, at, aimDirection(), nextSeed()));
+			play(CelesteFx.pop(p, at, aimDirection(), nextSeed()));
 			played = "melee pop at the wand";
 		} else {
 			played = "nothing";
@@ -514,7 +514,7 @@ public final class Effects {
 		if (on && !orbHeld) {
 			FxPack p = pack();
 			if (p != null) {
-				orbChargeFx = play(CelesteFx.orbCharge(p, () -> orbHeld ? attachmentWorld("weapon_top_fx") : null, () -> {
+				orbChargeFx = play(CelesteFx.orbCharge(p, () -> orbHeld ? wandTip() : null, () -> {
 					Vec3 h = orbHeld ? attachmentWorld("horn_tip_fx") : null;
 					return h != null || !orbHeld ? h : heroBody();
 				}, nextSeed()));
@@ -531,7 +531,7 @@ public final class Effects {
 	private static void throwOrb() {
 		FxPack p = pack();
 		var mc = Minecraft.getInstance();
-		Vec3 start = attachmentWorld("weapon_top_fx");
+		Vec3 start = wandTip();
 		if (start == null) start = heroBody();
 		if (p == null || mc.level == null || start == null) return;
 		Vec3[] vel = {aimDirection().scale(ORB_SPEED).add(0, ORB_LIFT, 0)};
@@ -629,6 +629,16 @@ public final class Effects {
 			}
 			mc.level.addParticle(dust, feet.x + c * d, feet.y + 0.05, feet.z + s * d, vx, 0.05 + r.nextDouble() * 0.1, vz);
 		}
+	}
+
+	/**
+	 * The wand's end away from her hand (round 8: held up for the orb, weapon_top_fx was the end in her hand), or
+	 * weapon_top_fx when the hand isn't known.
+	 */
+	private static Vec3 wandTip() {
+		Vec3 top = attachmentWorld("weapon_top_fx"), bottom = attachmentWorld("weapon_bot_fx"), hand = attachmentWorld("palm_R");
+		if (top == null || bottom == null || hand == null) return top;
+		return top.distanceToSqr(hand) >= bottom.distanceToSqr(hand) ? top : bottom;
 	}
 
 	/** About the middle of the hero's body (the player's position is her feet). */

@@ -18,7 +18,8 @@ public final class Beam implements Vfx {
 	private Vec3 a, b;
 	private float time, fadeOut = -1;
 	private boolean fading;
-	private final float[] xyz = new float[12], uv = {0, 0, 1, 0, 1, 1, 0, 1};
+	private final float[] xyz = new float[12];
+	private float[] uv = {0, 0, 1, 0, 1, 1, 0, 1};
 	private final int[] argb = new int[4];
 
 	public Beam(Vec3 from, Vec3 to, String texture, float width, float duration, float[] color, float alpha, float brightness) {
@@ -51,6 +52,17 @@ public final class Beam implements Vfx {
 		a = na;
 		b = nb;
 		return duration < 0 || time < duration;
+	}
+
+	/** Draws one frame of a sprite sheet along the beam (V from {@code from} to {@code to}). */
+	public Beam frame(FxPack pack, int sequence) {
+		FxPack.Sheet sheet = pack == null ? null : pack.sheet(texture);
+		if (sheet == null || sheet.sequences().isEmpty()) return this;
+		FxPack.Sequence s = sheet.sequences().get(Math.floorMod(sequence, sheet.sequences().size()));
+		if (s.frames().isEmpty()) return this;
+		float[] r = s.frames().get(0);
+		uv = new float[] {r[0], r[1], r[2], r[1], r[2], r[3], r[0], r[3]};
+		return this;
 	}
 
 	@Override

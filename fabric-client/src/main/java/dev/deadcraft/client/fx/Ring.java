@@ -8,7 +8,8 @@ import net.minecraft.world.phys.Vec3;
  * shockwaves.
  */
 public final class Ring implements Vfx {
-	private final Vec3 at, a, b;
+	private final Vec3 at;
+	private Vec3 a, b;
 	private final String texture;
 	private final float startSize, endSize, duration, alpha, brightness;
 	private final float[] color;
@@ -62,6 +63,15 @@ public final class Ring implements Vfx {
 		int col = Vfx.argb(color[0], color[1], color[2], al);
 		argb[0] = argb[1] = argb[2] = argb[3] = col;
 		out.quad(texture, additive, xyz, Glow.UV, argb, brightness);
+	}
+
+	/** Turns the card about its normal by {@code radians} (so repeated decals don't line up). */
+	public Ring roll(double radians) {
+		double c = Math.cos(radians), s = Math.sin(radians);
+		Vec3 na = a.scale(c).add(b.scale(s)), nb = b.scale(c).subtract(a.scale(s));
+		a = na;
+		b = nb;
+		return this;
 	}
 
 	/** Stays full for this fraction of its life before fading (0.4 by default). */

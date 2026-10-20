@@ -112,6 +112,19 @@ public final class HeroAnimator {
 	private static final String[] SLOT_NAMES = {"radiantblast", "prismaticguard", "luminousstrike", "dazzlingorb"};
 	private static final String[] SLOT_CLIPS = {"ability_unicorn_radiant_blast", "ability_unicorn_prismaticguard", null, ORB_START};
 
+	/**
+	 * Casts paced to Deadlock's (round 8: the blast's and the orb's moves came after their sounds): start {@code from}
+	 * seconds in and play at {@code rate} until the clip's release ({@code until}), then at its own speed. Radiant
+	 * Blast releases at 0.95 s (its hand's second burst of speed) but fires 0.3 s after the press (abilities.vdata
+	 * cast delay): from 0.35 at double speed reaches it at 0.3 s. The orb's raise (0.5 s of its hand moving) a third
+	 * quicker.
+	 */
+	private record CastPace(float from, float rate, float until) {}
+	private static final java.util.Map<String, CastPace> CAST_PACE = java.util.Map.of(
+		"ability_unicorn_radiant_blast", new CastPace(0.35f, 2, 0.95f),
+		ORB_START, new CastPace(0, 1.4f, 0.5f));
+	private float paceUntil = -1;
+
 	/** Deadlock's InputButton bit for signature ability {@code slot} (0 to 3). */
 	static long abilityButton(int slot) {
 		return 0x200000000L << slot;
@@ -372,6 +385,12 @@ public final class HeroAnimator {
 		actionRate = 1;
 		pendingSlot = -1;
 		combatTime = 0;
+		CastPace pace = CAST_PACE.get(clip);
+		paceUntil = pace == null ? -1 : pace.until();
+		if (pace != null) {
+			clipTime = pace.from();
+			actionRate = pace.rate();
+		}
 	}
 
 	/** Plays {@code clip} from {@code time}, crossfading from what the action showed. */
@@ -690,6 +709,10 @@ public final class HeroAnimator {
 		// read as four steps; cut short, the feet slid back to the idle's stance.
 		boolean settling = action == Action.MELEE && actionClip.endsWith("hit") && clipTime > HEAVY_STRIKE_S;
 		clipTime += dt * (action == Action.SHOOT ? SHOOT_RATE : settling ? 2 : actionRate);
+		if (paceUntil >= 0 && clipTime >= paceUntil) {
+			actionRate = 1;
+			paceUntil = -1;
+		}
 		if (action == Action.RELOAD && reloadSignalSeen && in.reload() >= 0) clipTime = in.reload() * clipDuration(actionClip);
 		actionFade = Math.min(1, actionFade + dt / actionFadeS);
 		float left = Float.MAX_VALUE;
