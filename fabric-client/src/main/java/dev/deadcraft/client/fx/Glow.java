@@ -22,11 +22,14 @@ public final class Glow implements Vfx {
 	private float charge;
 	private Vec3 at;
 	private float time, fadeOut = -1;
+	private boolean fading;
 	private final float phase;
 	private static final float FADE_S = 0.08f;
 	private static final int[][] SIGNS = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
 	static final float[] UV = {0, 1, 1, 1, 1, 0, 0, 0};
 	private final float[] xyz = new float[12];
+	/** Texture coordinates: the whole texture, or one sheet frame ({@link #frame}). */
+	private float[] uv = UV;
 	private final int[] argb = new int[4];
 
 	public Glow(Supplier<Vec3> anchor, String texture, float size, float[] color, float alpha, float brightness, float flicker, boolean additive,
@@ -68,15 +71,30 @@ public final class Glow implements Vfx {
 		return new Glow(() -> at, texture, size, color, alpha, brightness, 0, true, duration, endSize);
 	}
 
+	/** Draws one frame of a sprite sheet (the lens flare's rainbow arcs), not the whole texture. */
+	public Glow frame(FxPack pack, int sequence) {
+		FxPack.Sheet sheet = pack == null ? null : pack.sheet(texture);
+		if (sheet == null || sheet.sequences().isEmpty()) return this;
+		FxPack.Sequence s = sheet.sequences().get(Math.floorMod(sequence, sheet.sequences().size()));
+		if (s.frames().isEmpty()) return this;
+		float[] r = s.frames().get(0);
+		uv = new float[] {r[0], r[3], r[2], r[3], r[2], r[1], r[0], r[1]};
+		return this;
+	}
+
 	@Override
 	public void stop() {
-		if (fadeOut < 0) fadeOut = FADE_S;
+		// Once only: a group keeps stepping parts that have finished.
+		if (!fading) {
+			fading = true;
+			fadeOut = FADE_S;
+		}
 	}
 
 	@Override
 	public boolean tick(float dt) {
 		time += dt;
-		if (fadeOut >= 0) {
+		if (fading) {
 			fadeOut -= dt;
 			return fadeOut > 0;
 		}
@@ -93,7 +111,7 @@ public final class Glow implements Vfx {
 	public void draw(Vec3 eye, Vec3 right, Vec3 up, Out out) {
 		if (at == null) return;
 		float t = duration > 0 ? Math.min(1, time / duration) : charge > 0 ? Math.min(1, time / charge) : 0;
-		float a = alpha * (duration > 0 ? (1 - t) * (1 - t) : 1) * (fadeOut >= 0 ? fadeOut / FADE_S : 1);
+		float a = alpha * (duration > 0 ? (1 - t) * (1 - t) : 1) * (fading ? Math.max(0, fadeOut) / FADE_S : 1);
 		// Two out-of-step waves: an uneven flicker.
 		float f = 1 + flicker * (float) (0.6 * Math.sin(time * 23 + phase) + 0.4 * Math.sin(time * 37.7 + phase * 2));
 		float s = size * f * (1 + (endSize - 1) * t);
@@ -106,6 +124,6 @@ public final class Glow implements Vfx {
 		}
 		int col = Vfx.argb(color[0], color[1], color[2], a);
 		argb[0] = argb[1] = argb[2] = argb[3] = col;
-		out.quad(texture, additive, xyz, UV, argb, brightness * f);
+		out.quad(texture, additive, xyz, uv, argb, brightness * f);
 	}
 }

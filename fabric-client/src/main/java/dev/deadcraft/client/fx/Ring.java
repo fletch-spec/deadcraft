@@ -14,6 +14,8 @@ public final class Ring implements Vfx {
 	private final float[] color;
 	private final boolean additive;
 	private float time;
+	/** The fraction of its life it stays full before fading. */
+	private float hold = 0.4f;
 	private final float[] xyz = new float[12];
 	private final int[] argb = new int[4];
 
@@ -44,10 +46,10 @@ public final class Ring implements Vfx {
 	@Override
 	public void draw(Vec3 eye, Vec3 right, Vec3 up, Out out) {
 		float t = Math.min(1, time / duration);
-		// Grows fast then slows (ease out); fades over the second half.
+		// Grows fast then slows (ease out); fades over the last part.
 		float grow = 1 - (1 - t) * (1 - t);
 		float s = startSize + (endSize - startSize) * grow;
-		float fade = t < 0.4f ? 1 : 1 - (t - 0.4f) / 0.6f;
+		float fade = t < hold ? 1 : 1 - (t - hold) / (1 - hold);
 		float al = alpha * fade;
 		if (s <= 0 || al <= 0.002f) return;
 		double cx = at.x - eye.x, cy = at.y - eye.y, cz = at.z - eye.z;
@@ -60,6 +62,12 @@ public final class Ring implements Vfx {
 		int col = Vfx.argb(color[0], color[1], color[2], al);
 		argb[0] = argb[1] = argb[2] = argb[3] = col;
 		out.quad(texture, additive, xyz, Glow.UV, argb, brightness);
+	}
+
+	/** Stays full for this fraction of its life before fading (0.4 by default). */
+	public Ring hold(float fraction) {
+		hold = Math.max(0, Math.min(0.99f, fraction));
+		return this;
 	}
 
 	@Override

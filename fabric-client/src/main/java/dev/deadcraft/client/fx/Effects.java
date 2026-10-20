@@ -447,10 +447,12 @@ public final class Effects {
 
 	// ---- Celeste's abilities and movement (hand-built) -----------------------------------------------
 
-	/** Luminous Strike lands where she aims, up to this far (blocks): a guess, the plugin doesn't send its target. */
-	private static final double STRIKE_RANGE = 30;
-	/** The thrown orb's speed (blocks/s) and reach (blocks): guesses, the plugin doesn't send the orb. */
-	private static final double ORB_SPEED = 20, ORB_RANGE = 30;
+	/**
+	 * The thrown orb: lobbed along her aim at this speed (blocks/s), a little upward, falling under this gravity
+	 * (blocks/s/s), for at most this far (blocks). Guesses matched to the recording (it lands about 6 blocks out
+	 * from a level throw); the plugin doesn't send the orb.
+	 */
+	private static final double ORB_SPEED = 18, ORB_LIFT = 3, ORB_GRAVITY = 20, ORB_RANGE = 40;
 	private static final java.util.Set<String> abilitiesLogged = new java.util.HashSet<>();
 
 	private static long nextSeed() {
@@ -468,31 +470,31 @@ public final class Effects {
 		};
 		String played;
 		if (n.contains("radiantblast")) {
-			play(CelesteFx.radiantBlast(p, wand != null ? wand : body, aimDirection(), nextSeed()));
+			play(CelesteFx.radiantBlast(p, wand != null ? wand : body, aimDirection(), feet, nextSeed()));
 			played = "Radiant Blast's cast (its bullets come as ability shots)";
 		} else if (n.contains("prismaticguard")) {
 			play(CelesteFx.prismaticGuard(p, horn, Effects::heroBody, nextSeed()));
 			played = "Prismatic Guard";
 		} else if (n.contains("luminousstrike")) {
-			Vec3 target = aimTarget(STRIKE_RANGE);
-			play(CelesteFx.luminousStrike(p, horn, target, nextSeed()));
-			played = String.format("Luminous Strike at %.1f blocks", target.distanceTo(body));
+			var left = Minecraft.getInstance().gameRenderer.mainCamera().leftVector();
+			play(CelesteFx.luminousStrike(p, horn, feet, new Vec3(-left.x(), 0, -left.z()).normalize(), nextSeed()));
+			played = "Luminous Strike round her";
 		} else if (n.contains("dazzlingorb")) {
 			played = "nothing (the orb charges while channelling and flies when let go)";
 		} else if (n.contains("ability_dash")) {
 			Vec3 dir = new Vec3(heroVelocity.x, 0, heroVelocity.z);
 			if (dir.lengthSqr() < 1) dir = aimFrame()[0];
 			dir = dir.normalize();
-			play(CelesteFx.dash(p, Effects::heroBody, feet, dir, nextSeed()));
+			play(CelesteFx.dash(p, Effects::heroBody, dir, !heroGrounded, nextSeed()));
 			if (heroGrounded) blockDust(feet, 10, dir, 0.12);
-			played = "dash";
+			played = heroGrounded ? "ground dash" : "air dash";
 		} else if (n.contains("ability_jump")) {
+			play(CelesteFx.jump(p, feet, nextSeed()));
 			if (airTime > AIR_JUMP_S) {
-				play(CelesteFx.airJump(p, feet, nextSeed()));
 				played = "air jump";
 			} else {
 				blockDust(feet, 8, null, 0.08);
-				played = "ground jump dust";
+				played = "ground jump";
 			}
 		} else if (n.contains("melee")) {
 			Vec3 at = wand != null ? wand : body;
@@ -511,7 +513,12 @@ public final class Effects {
 	private static void handChanneling(boolean on) {
 		if (on && !orbHeld) {
 			FxPack p = pack();
-			if (p != null) orbChargeFx = play(CelesteFx.orbCharge(p, () -> orbHeld ? attachmentWorld("weapon_top_fx") : null, nextSeed()));
+			if (p != null) {
+				orbChargeFx = play(CelesteFx.orbCharge(p, () -> orbHeld ? attachmentWorld("weapon_top_fx") : null, () -> {
+					Vec3 h = orbHeld ? attachmentWorld("horn_tip_fx") : null;
+					return h != null || !orbHeld ? h : heroBody();
+				}, nextSeed()));
+			}
 		} else if (!on && orbHeld) {
 			if (orbChargeFx != null) orbChargeFx.stop();
 			orbChargeFx = null;
@@ -527,7 +534,7 @@ public final class Effects {
 		Vec3 start = attachmentWorld("weapon_top_fx");
 		if (start == null) start = heroBody();
 		if (p == null || mc.level == null || start == null) return;
-		Vec3 dir = aimDirection();
+		Vec3[] vel = {aimDirection().scale(ORB_SPEED).add(0, ORB_LIFT, 0)};
 		Vec3[] at = {start};
 		double[] travelled = {0};
 		boolean[] done = {false};
@@ -537,7 +544,8 @@ public final class Effects {
 			@Override
 			public boolean tick(float dt) {
 				if (!done[0] && mc.level != null) {
-					Vec3 next = at[0].add(dir.scale(ORB_SPEED * dt));
+					vel[0] = vel[0].add(0, -ORB_GRAVITY * dt, 0);
+					Vec3 next = at[0].add(vel[0].scale(dt));
 					HitResult hit = mc.level.clip(new ClipContext(at[0], next, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
 					boolean landed = hit.getType() != HitResult.Type.MISS;
 					Vec3 end = landed ? hit.getLocation() : next;
@@ -545,7 +553,7 @@ public final class Effects {
 					at[0] = end;
 					if (landed || travelled[0] >= ORB_RANGE) {
 						done[0] = true;
-						Vec3 normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : dir.scale(-1);
+						Vec3 normal = landed ? ((BlockHitResult) hit).getDirection().getUnitVec3() : new Vec3(0, 1, 0);
 						play(CelesteFx.orbBurst(p, end, normal, nextSeed()));
 					}
 				}
@@ -633,17 +641,6 @@ public final class Effects {
 	private static Vec3 aimDirection() {
 		var f = Minecraft.getInstance().gameRenderer.mainCamera().forwardVector();
 		return new Vec3(f.x(), f.y(), f.z()).normalize();
-	}
-
-	/** The first block on the crosshair's ray within {@code range}, or the ray's end; then down onto the ground. */
-	private static Vec3 aimTarget(double range) {
-		var mc = Minecraft.getInstance();
-		Vec3 eye = mc.gameRenderer.mainCamera().position(), end = eye.add(aimDirection().scale(range));
-		if (mc.level == null) return end;
-		HitResult hit = mc.level.clip(new ClipContext(eye, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
-		Vec3 t = hit.getType() != HitResult.Type.MISS ? hit.getLocation() : end;
-		HitResult down = mc.level.clip(new ClipContext(t.add(0, 0.1, 0), t.add(0, -40, 0), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, mc.player));
-		return down.getType() != HitResult.Type.MISS ? down.getLocation() : t;
 	}
 
 	// ---- per frame -------------------------------------------------------------------------------

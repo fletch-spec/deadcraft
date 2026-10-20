@@ -57,6 +57,9 @@ public final class Emitter implements Vfx {
 		float perBlock;
 		/** Each part a random bright hue instead of the colour stops (prismatic sparkles). */
 		boolean rainbow;
+		/** Spawn on a flat disc of this radius round the anchor (or on its edge only: {@link #ring}). */
+		float disc;
+		boolean ring;
 		/** Random starting roll (radians, either way) and spin (radians/s, either way). */
 		float roll, spin;
 
@@ -86,6 +89,8 @@ public final class Emitter implements Vfx {
 		Spec local() { local = true; return this; }
 		Spec perBlock(float n) { perBlock = n; return this; }
 		Spec rainbow() { rainbow = true; return this; }
+		Spec disc(float r) { disc = r; return this; }
+		Spec ring(float r) { disc = r; ring = true; return this; }
 	}
 
 	private final Spec spec;
@@ -168,6 +173,10 @@ public final class Emitter implements Vfx {
 		int i = count++, o = i * 3;
 		Vec3 p = at;
 		if (spec.spawnRadius > 0) p = p.add(unitBall().scale(spec.spawnRadius));
+		if (spec.disc > 0) {
+			double a = rng.nextDouble() * Math.PI * 2, r = spec.ring ? spec.disc : spec.disc * Math.sqrt(rng.nextDouble());
+			p = p.add(Math.cos(a) * r, 0, Math.sin(a) * r);
+		}
 		Vec3 v = spec.velocity;
 		Vec3[] f = frame == null ? null : frame.get();
 		if (f != null) v = f[0].scale(v.x).add(f[1].scale(v.y)).add(f[2].scale(v.z));

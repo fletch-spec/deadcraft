@@ -86,19 +86,22 @@ class CelesteFxTest {
 			// The tracer from further back (a frame 4.5 blocks wide), crossing it.
 			rows(pack, "tracer_wide", c -> CelesteFx.tracer(pack, () -> new Vec3(0, 0, -2.5 + c[0] * 30.8), 4), o, new float[] {0.05f, 0.08f, 0.11f, 0.14f, 0.2f}, 0.9f);
 			// Abilities, at a frame 2.3 blocks wide unless said.
-			rows(pack, "radiant_blast", c -> CelesteFx.radiantBlast(pack, o, dir, 5), o, new float[] {0.02f, 0.05f, 0.1f, 0.2f, 0.35f}, 1.75f);
+			// From the side (the blast goes along +z, across the view), 9 blocks wide.
+			rows(pack, "radiant_blast", c -> CelesteFx.radiantBlast(pack, new Vec3(0, 0, -2), dir, new Vec3(0, -1.2, -2), 5), o,
+				new float[] {0.05f, 0.15f, 0.3f, 0.5f, 0.7f}, 0.45f);
 			rows(pack, "radiant_dagger", c -> CelesteFx.radiantDagger(pack, () -> new Vec3(0, 0, -1 + c[0] * 40), 6), o, new float[] {0.02f, 0.03f, 0.04f, 0.05f, 0.06f}, 1.75f);
 			Vec3 body = new Vec3(0, 0, 0);
-			rows(pack, "prismatic_guard", c -> CelesteFx.prismaticGuard(pack, () -> new Vec3(0, 0.6, 0), () -> body, 7), o, new float[] {0.05f, 0.2f, 0.6f, 1.2f, 2f}, 1.75f);
+			rows(pack, "prismatic_guard", c -> CelesteFx.prismaticGuard(pack, () -> new Vec3(0, 0.6, 0), () -> body, 7), o, new float[] {0.1f, 0.4f, 1.5f, 3f, 3.6f}, 0.9f);
 			// A frame 18 blocks wide, centred 7 up the pillar.
-			rows(pack, "luminous_strike", c -> CelesteFx.luminousStrike(pack, () -> new Vec3(0, 0, 0), new Vec3(0, -7, 0), 8), o, new float[] {0.1f, 0.2f, 0.3f, 0.45f, 0.7f}, 0.22f);
-			rows(pack, "orb_charge", c -> CelesteFx.orbCharge(pack, () -> o, 9), o, new float[] {0.1f, 0.3f, 0.6f, 1f, 1.5f}, 1.75f);
+			// Seen from 3 blocks off its side and level with the ground: 18 blocks wide, centred 4 up.
+			rows(pack, "luminous_strike", c -> CelesteFx.luminousStrike(pack, () -> new Vec3(0, -2.5, 0), new Vec3(0, -4, 0), RIGHT, 8), o,
+				new float[] {0.2f, 0.5f, 1.2f, 1.6f, 1.9f}, 0.22f);
+			rows(pack, "orb_charge", c -> CelesteFx.orbCharge(pack, () -> o, () -> new Vec3(0, -0.6, -0.3), 9), o, new float[] {0.1f, 0.3f, 0.6f, 1f, 1.5f}, 1.75f);
 			rows(pack, "orb_flight", c -> CelesteFx.orbFlight(pack, () -> new Vec3(0, 0, -1 + c[0] * 20), 10), o, new float[] {0.02f, 0.05f, 0.08f, 0.11f, 0.14f}, 1.75f);
 			// 9 blocks wide.
 			rows(pack, "orb_burst", c -> CelesteFx.orbBurst(pack, o, new Vec3(1, 0, 0), 11), o, new float[] {0.03f, 0.1f, 0.2f, 0.35f, 0.6f}, 0.45f);
-			rows(pack, "dash", c -> CelesteFx.dash(pack, () -> new Vec3(0, 0, -1 + c[0] * 10), new Vec3(0, -0.8, -1), new Vec3(0, 0, 1), 12), o,
-				new float[] {0.05f, 0.1f, 0.15f, 0.2f, 0.3f}, 0.9f);
-			rows(pack, "air_jump", c -> CelesteFx.airJump(pack, new Vec3(0, -0.2, 0), 13), o, new float[] {0.03f, 0.08f, 0.15f, 0.25f, 0.4f}, 1.75f);
+			rows(pack, "air_dash", c -> CelesteFx.dash(pack, () -> o, new Vec3(0, 0, 1), true, 12), o, new float[] {0.03f, 0.1f, 0.2f, 0.3f, 0.4f}, 0.9f);
+			rows(pack, "jump", c -> CelesteFx.jump(pack, new Vec3(0, -0.4, 0), 13), o, new float[] {0.03f, 0.08f, 0.15f, 0.25f, 0.4f}, 0.9f);
 		}
 	}
 
@@ -124,16 +127,16 @@ class CelesteFxTest {
 	void abilityEffectsEnd() throws Exception {
 		try (FxPack pack = FxRealPackTest.celeste()) {
 			Vec3 o = Vec3.ZERO, x = new Vec3(1, 0, 0), up = new Vec3(0, 1, 0);
-			Vfx[] all = {CelesteFx.radiantBlast(pack, o, x, 1), CelesteFx.radiantHit(pack, o, up, 2), CelesteFx.prismaticGuard(pack, () -> o, () -> o, 3),
-				CelesteFx.luminousStrike(pack, () -> o, new Vec3(5, 0, 0), 4), CelesteFx.orbBurst(pack, o, up, 5), CelesteFx.dash(pack, () -> o, o, x, 6),
-				CelesteFx.airJump(pack, o, 7)};
+			Vfx[] all = {CelesteFx.radiantBlast(pack, o, x, o, 1), CelesteFx.radiantHit(pack, o, up, 2), CelesteFx.prismaticGuard(pack, () -> o, () -> o, 3),
+				CelesteFx.luminousStrike(pack, () -> o, o, RIGHT, 4), CelesteFx.orbBurst(pack, o, up, 5), CelesteFx.dash(pack, () -> o, x, true, 6),
+				CelesteFx.dash(pack, () -> o, x, false, 7), CelesteFx.jump(pack, o, 8)};
 			for (Vfx v : all) {
 				float t = 0;
-				while (v.tick(1 / 60f) && t < 5) t += 1 / 60f;
-				assertTrue(t < 3, "over in " + t + " s");
+				while (v.tick(1 / 60f) && t < 6) t += 1 / 60f;
+				assertTrue(t < 4.5f, v + " over in " + t + " s, effect " + java.util.Arrays.asList(all).indexOf(v));
 			}
 			boolean[] held = {true};
-			Vfx charge = CelesteFx.orbCharge(pack, () -> held[0] ? o : null, 8);
+			Vfx charge = CelesteFx.orbCharge(pack, () -> held[0] ? o : null, () -> held[0] ? up : null, 8);
 			for (int i = 0; i < 120; i++) assertTrue(charge.tick(1 / 60f));
 			held[0] = false;
 			float t = 0;

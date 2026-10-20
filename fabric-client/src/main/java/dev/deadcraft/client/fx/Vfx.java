@@ -80,6 +80,30 @@ public interface Vfx {
 		};
 	}
 
+	/**
+	 * Runs {@code clock[0]} forward before stepping {@code inner}: for parts whose points move by time (an orbit,
+	 * a spiral, a thrown spark) or that end at a set time.
+	 */
+	static Vfx clocked(float[] clock, Vfx inner) {
+		return new Vfx() {
+			@Override
+			public boolean tick(float dt) {
+				clock[0] += dt;
+				return inner.tick(dt);
+			}
+
+			@Override
+			public void draw(Vec3 eye, Vec3 right, Vec3 up, Out out) {
+				inner.draw(eye, right, up, out);
+			}
+
+			@Override
+			public void stop() {
+				inner.stop();
+			}
+		};
+	}
+
 	/** Linear colour (0..1 each) and alpha to the ARGB the cards take. */
 	static int argb(float r, float g, float b, float a) {
 		return (clamp255(a) << 24) | (clamp255(r) << 16) | (clamp255(g) << 8) | clamp255(b);
