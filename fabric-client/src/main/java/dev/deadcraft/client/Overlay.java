@@ -23,9 +23,9 @@ import net.minecraft.client.gui.screens.PauseScreen;
  * never touched: this only moves and restyles Minecraft's own window (user32 through the Foreign
  * Function API).
  *
- * <p>F6 hands input to Minecraft and opens chat, Esc opens its pause menu (Quit is there); when
- * Minecraft's screen closes, input goes back to
- * Deadlock. Screens Minecraft opens itself (death) also hand it input. Deadlock must run in a window or
+ * <p>F6 hands input to Minecraft and opens chat, Esc opens its pause menu (Quit is there); while
+ * paused it isn't on top, so Alt+Tab reaches other windows on that monitor (to type somewhere with the
+ * game open); when Minecraft's screen closes, input goes back to Deadlock and it's on top again. Screens Minecraft opens itself (death) also hand it input. Deadlock must run in a window or
  * borderless window: nothing can be drawn over exclusive fullscreen.
  */
 final class Overlay {
@@ -36,7 +36,7 @@ final class Overlay {
 	private static final long WS_POPUP = 0x80000000L, WS_VISIBLE = 0x10000000L, WS_OVERLAPPEDWINDOW = 0x00CF0000L;
 	private static final long WS_EX_LAYERED = 0x80000, WS_EX_TRANSPARENT = 0x20, WS_EX_NOACTIVATE = 0x08000000L;
 	private static final long HWND_TOPMOST = -1, HWND_NOTOPMOST = -2;
-	private static final int SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_SHOWWINDOW = 0x40;
+	private static final int SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_FRAMECHANGED = 0x20, SWP_SHOWWINDOW = 0x40;
 	private static final int LWA_ALPHA = 0x2;
 	private static final long PLACE_INTERVAL_NS = 250_000_000L;
 
@@ -124,6 +124,9 @@ final class Overlay {
 					setInteractive(true);
 					mc.gui.setScreen(new PauseScreen(true));
 					pauseOpen = true;
+					// Paused: let other windows over it (Alt+Tab), until the menu closes.
+					int ok = (int) SET_WINDOW_POS.invoke(mcWindow, MemorySegment.ofAddress(HWND_NOTOPMOST), 0, 0, 0, 0,
+						SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 				}
 			} else if (!interactive && (f6Pressed || screenOpen)) {
 				setInteractive(true);
@@ -214,8 +217,9 @@ final class Overlay {
 		}
 		if (java.util.Arrays.equals(r, placedRect)) return;
 		System.arraycopy(r, 0, placedRect, 0, 4);
+		// Paused, it keeps its place in the order (not on top: see the Esc branch in update).
 		int ok = (int) SET_WINDOW_POS.invoke(mcWindow, MemorySegment.ofAddress(HWND_TOPMOST), r[0], r[1], r[2] - r[0], r[3] - r[1],
-			SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED);
+			SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_FRAMECHANGED | (pauseOpen ? SWP_NOZORDER : 0));
 		Follow.LOG.info("Deadcraft: overlay placed at {},{} size {}x{}", r[0], r[1], r[2] - r[0], r[3] - r[1]);
 	}
 
